@@ -14,6 +14,7 @@ public sealed class OpenAiCompatibleProvider : IModelProvider
 
     private readonly HttpClient _httpClient;
     private readonly ModelProfile _profile;
+    private string? _resolvedProtocol;
 
     public OpenAiCompatibleProvider(HttpClient httpClient, ModelProfile profile)
     {
@@ -29,24 +30,63 @@ public sealed class OpenAiCompatibleProvider : IModelProvider
         if (!CanUseProfile(_profile))
             return null;
 
+        var characterRequest = RemoveGmOnlyKnowledge(request);
         RequestAttempt? lastAttempt = null;
-        foreach (var protocol in GetProtocolOrder(_profile))
+        foreach (var protocol in GetRequestProtocolOrder())
         {
             lastAttempt = await SendConversationAsync(
                     _profile,
                     protocol,
-                    request,
+                    characterRequest,
                     cancellationToken)
                 .ConfigureAwait(false);
 
             if (lastAttempt.Response is not null)
+            {
+                _resolvedProtocol = protocol;
                 return lastAttempt.Response;
+            }
 
             if (!ShouldTryAlternative(_profile, lastAttempt))
                 break;
         }
 
         return null;
+    }
+
+    private static ConversationRequest RemoveGmOnlyKnowledge(ConversationRequest request)
+    {
+        if (request.GameContext.GmKnowledge.Count == 0)
+            return request;
+
+        var source = request.GameContext;
+        var context = new GameConversationContext
+        {
+            Authority = source.Authority,
+            Character = source.Character,
+            OriginalCharacterProfile = source.OriginalCharacterProfile,
+            Trade = source.Trade,
+            OriginalStoryFacts = source.OriginalStoryFacts,
+            OriginalDialogueContext = source.OriginalDialogueContext,
+            Relationship = source.Relationship,
+            Procurement = source.Procurement,
+            ActiveWorldEvents = source.ActiveWorldEvents,
+            ThirdPartyTasks = source.ThirdPartyTasks,
+            GmKnowledge = new List<string>()
+        };
+        return new ConversationRequest
+        {
+            ConversationId = request.ConversationId,
+            TurnId = request.TurnId,
+            CharacterKey = request.CharacterKey,
+            CharacterDisplayName = request.CharacterDisplayName,
+            FactionKey = request.FactionKey,
+            Scene = request.Scene,
+            PlayerText = request.PlayerText,
+            OffTopicStreak = request.OffTopicStreak,
+            RecentHistory = request.RecentHistory,
+            GameContext = context
+        };
     }
 
     public async Task<ConversationResponse?> CompleteGmAsync(
@@ -74,10 +114,21 @@ public sealed class OpenAiCompatibleProvider : IModelProvider
                 .ToList(),
             GameContext = request.GameContext
         };
-        foreach (var protocol in GetProtocolOrder(_profile))
+        foreach (var protocol in GetRequestProtocolOrder())
         {
-            var attempt = await SendConversationAsync(_profile, protocol, gmRequest, cancellationToken, GmSystemPrompt).ConfigureAwait(false);
-            if (attempt.Response is not null) return attempt.Response;
+            var attempt = await SendConversationAsync(
+                    _profile,
+                    protocol,
+                    gmRequest,
+                    cancellationToken,
+                    GmSystemPrompt,
+                    maxOutputTokens: Math.Min(_profile.MaxOutputTokens, 280))
+                .ConfigureAwait(false);
+            if (attempt.Response is not null)
+            {
+                _resolvedProtocol = protocol;
+                return attempt.Response;
+            }
             if (!ShouldTryAlternative(_profile, attempt)) break;
         }
         return null;
@@ -142,7 +193,8 @@ public sealed class OpenAiCompatibleProvider : IModelProvider
         string protocol,
         ConversationRequest request,
         CancellationToken cancellationToken,
-        string systemPrompt)
+        string systemPrompt,
+        int? maxOutputTokens = null)
     {
         try
         {
@@ -150,9 +202,9 @@ public sealed class OpenAiCompatibleProvider : IModelProvider
             using var message = CreateMessage(
                 profile,
                 protocol,
-                BuildConversationBody(profile, protocol, request, systemPrompt));
+                BuildConversationBody(profile, protocol, request, systemPrompt, maxOutputTokens));
             using var response = await _httpClient
-                .SendAsync(message, timeout.Token)
+                .SendAsync(message, HttpCompletionOption.ResponseHeadersRead, timeout.Token)
                 .ConfigureAwait(false);
             var responseBody = await response.Content
                 .ReadAsStringAsync(timeout.Token)
@@ -268,8 +320,13 @@ public sealed class OpenAiCompatibleProvider : IModelProvider
         ModelProfile profile,
         string protocol,
         ConversationRequest request,
-        string systemPrompt = ConversationSystemPrompt)
+        string systemPrompt = ConversationSystemPrompt,
+        int? maxOutputTokens = null)
     {
+        var outputLimit = Math.Clamp(
+            maxOutputTokens ?? profile.MaxOutputTokens,
+            32,
+            8000);
         if (protocol == ResponsesProtocol)
         {
             return new
@@ -279,7 +336,7 @@ public sealed class OpenAiCompatibleProvider : IModelProvider
                     "\nReturn a valid json object and do not wrap it in markdown.",
                 input = "Return a json object for this conversation:\n" +
                     JsonSerializer.Serialize(request),
-                max_output_tokens = profile.MaxOutputTokens,
+                max_output_tokens = outputLimit,
                 reasoning = new { effort = "low" },
                 text = new { format = new { type = "json_object" } }
             };
@@ -289,7 +346,7 @@ public sealed class OpenAiCompatibleProvider : IModelProvider
         {
             model = profile.Model,
             temperature = 0.7,
-            max_tokens = profile.MaxOutputTokens,
+            max_tokens = outputLimit,
             response_format = new { type = "json_object" },
             messages = BuildConversationMessages(request, systemPrompt + ThirdPartyTaskRules)
         };
@@ -373,6 +430,18 @@ public sealed class OpenAiCompatibleProvider : IModelProvider
                 new[] { ResponsesProtocol, ChatCompletionsProtocol },
             _ => new[] { ChatCompletionsProtocol, ResponsesProtocol }
         };
+    }
+
+    private IReadOnlyList<string> GetRequestProtocolOrder()
+    {
+        var order = GetProtocolOrder(_profile);
+        if (string.IsNullOrWhiteSpace(_resolvedProtocol))
+            return order;
+
+        return new[] { _resolvedProtocol }
+            .Concat(order.Where(protocol =>
+                !protocol.Equals(_resolvedProtocol, StringComparison.OrdinalIgnoreCase)))
+            .ToArray();
     }
 
     private static bool ShouldTryAlternative(ModelProfile profile, RequestAttempt attempt)
@@ -999,7 +1068,7 @@ public sealed class OpenAiCompatibleProvider : IModelProvider
 
     private const string GmSystemPrompt = @"你是 GM 监督 AI，不扮演人物。只分析当前玩家输入、原版上下文、人物候选回复、人物候选转账提案和 gm_knowledge，先识别目标，再按目标路径优先级选择当前状态满足条件的已有接口；直接路径不可用时选择备用路径。只能返回 JSON；npc_reply 固定填写 GM，world_modifications 只填写已确认可执行且可验证的计划，并填写 goal、path。若人物候选转账提案 explicit=true，你必须复核人物候选回复是否明确答应从当前顾客 client_budget 补付该具体金额：合理且可验证时输出同金额的 wallet_transfer 且 accepted=true，不合理或接口前置条件不满足时输出 wallet_transfer explicit=true、accepted=false；若没有候选转账提案且对话没有明确承诺，不得自行创造转账。source 固定为 client_budget。找不到合理落点时保持 world_modifications 为空。不得创造接口、字段、物品或机制。\n物品归属复核：trade.item.owner、client_carried_items 中的 owner 和 player_offered_items 中的 owner 是原版归属结论。owner=client 或界面“未拥有”表示顾客带来的物品，即使物品在玩家侧柜台、正在议价或 GetCountersItems() 返回了它，也不能当成玩家物品；只有 owner=player 的真实玩家侧物品才可作为玩家交换物。owner=unknown 时拒绝猜测并让相关提案保持未接受。identifier、internal_name、display_name、tags、condition_identifier 仅用于区分物品，不能推翻 owner。\n";
 
-    private const string ConversationSystemPrompt = @"GM 规则：只使用 gm_knowledge 中列出的已有接口和字段。找不到可执行的已有数值或文本落点时，必须自然拒绝玩家的承诺，不得声称答应，也不要输出“已记录但未生效”等内部说明。只有找到合理落点时才填写 world_modifications；未知字段、虚构接口和无法验证的因果链不填写。
+    private const string ConversationSystemPrompt = @"你负责扮演人物并提取玩家的明确意图；世界数值和已有接口的最终裁决由另一个 GM 监督步骤完成。人物不得声称未经原版流程确认的价格、交换、预算或世界变化已经生效，也不要向玩家暴露内部审核过程；world_modifications 通常留空，未知字段、虚构接口和无法验证的因果链不要填写。
 你正在扮演《深空当铺》当前场景中的原版人物，而不是另一个平行角色。
 original_character_profile 是不可覆盖的原版角色档案：canonical_identity 决定你是谁；role_and_background 决定身份、职业和稳定背景；current_story_state 决定剧情进度；immutable_constraints 是硬约束；knowledge_boundaries 决定人物能知道什么；speech_style_samples 是措辞、节奏和态度的模仿样本。回复前必须先统一这些信息。不得改名、自称另一名原版人物、换阵营或职业，也不得把别人的经历、电话身份和台词归到自己身上。资料不足时保持含糊，不要补造身世。
 game_context 中的原版身份、剧情经历、来访记录、台词、交易物品、预算、鉴定能力和派系状态是权威事实；relationship 中的个人关系、派系关系和摘要记忆是对这些事实的补充。把两者自然融合成同一个人的经历与态度，不要解释数据结构，也不要编造未提供的交易、物品、秘密、人物或事件。个人好感可以改变同一人物的态度与选择，但不能改写其原版身份、既定背景或已发生剧情。
@@ -1010,8 +1079,8 @@ game_context 中的原版身份、剧情经历、来访记录、台词、交易�
 memory_candidates 只记录玩家在本轮明确做过、承诺过或反复表达且值得以后记住的简短事实，不得把人物自己的临时情绪写成玩家行为。
 procurement 用于“玩家请当前顾客未来寻找并带来某类货物”的委托。只有玩家原话明确包含未来时间、寻找或携带动作以及玩家收购意图，且 procurement.can_request_future_goods=true 时，procurement_proposal.explicit 才能为 true。procurement.category_access 是人物原版身份、阵营、职业和真实随身货物推导出的硬性渠道边界；对应类别 allowed=false 时人物必须自然拒绝，绝不能因为玩家出价高或关系好而答应。allowed=true 只代表可以尝试，max_rarity 仍会限制其能接触的具体货物，原版掉落权重还会影响最终物品与成功率。模糊请求只有在能可靠归到唯一类别时才可接受，并用 category_confidence 给出 0 到 1 的把握；低于 0.7、同时涉及多个类别或“带点好东西”这类没有明确类型的请求，必须令 clarification_needed=true、accepted=false，并在 npc_reply 中追问。不得擅自承诺某件稀有物品；明确指定的货也只能说会尝试寻找，不得保证成功。人物只有在 npc_reply 中明确答应寻找时 accepted 才能为 true；拒绝、含糊回应或只是谈眼前货物时必须为 false。category 只能是 none、food、medical、material、household、weapon、tool、module、access_card、junk。不要因此更改人物当前原版来意；程序会把找到的货作为下次来访的附加交易。promised_premium_percent 只记录玩家明确承诺的加价，未给具体比例但明确说“高价收”时可填 15，最高 50。没有有效委托时必须返回 {""explicit"":false,""accepted"":false,""category"":""none"",""category_confidence"":0,""clarification_needed"":false,""requested_description"":"""",""due_in_days"":1,""promised_premium_percent"":0,""reason"":""""}。
  return_visit_proposal 只用于不包含找货内容的普通未来回访邀请。玩家必须明确说未来某天再来，人物也必须在 npc_reply 中明确答应；程序只把它加入原版未来队列，不保证挤掉故事来客或展柜吸引的顾客。carried_inventory_proposal 用于玩家要求买家展示或出售本次真正携带的其他货物，只有人物同意且清单里确有物品时 accepted 才能为 true。barter_proposal 用于明确的以物换物；client_item_runtime_key 必须来自 owner=client 的 client_carried_items；required_player_item_runtime_key 或 required_player_item_runtime_keys（优先使用）必须来自 owner=player 的 trade.player_offered_items，用于在 identifier 或显示名重复时锁定同一件物品；required_player_item_key 必须来自 owner=player 的真实柜台物品，不得把合并柜台列表中的顾客物品当成玩家物品，也不得虚构。wallet_transfer 只用于人物明确承诺从自己的 client_budget 支付给玩家；amount 必须是对话中明确的整数，且 accepted 只有在 npc_reply 明确答应后才为 true。不得把普通价格、找零或玩家自己的钱误报成转账。电话场景这四类提案全部必须为 false。
-必须只返回一个 JSON 对象。字段严格为：npc_reply（字符串）、conversation_mode（continue 或 return_to_task）、topic（字符串）、task_relevance（0 到 1）、mood（字符串）、signals（对象，含 warmth、respect、trust、offense、threat、cooperation、credibility、trade_willingness 八个整数）、memory_candidates（数组，元素含 kind、summary、importance）、trade_proposal（对象，含 kind、percent、target_amount、explicit、reason）、wallet_transfer（对象，含 explicit、accepted、amount、source、reason）、procurement_proposal（对象，含 explicit、accepted、category、category_confidence、clarification_needed、requested_description、due_in_days、promised_premium_percent、reason）、return_visit_proposal（对象，含 explicit、accepted、due_in_days、reason）、carried_inventory_proposal（对象，含 explicit、accepted、reason）、barter_proposal（对象，含 explicit、accepted、client_item_runtime_key、client_item_name、required_player_item_runtime_key、required_player_item_runtime_keys、required_player_item_key、required_player_item_name、required_player_item_keys、required_player_item_names、reason）。
-所有 signals 值必须为 -2 到 2 的整数；importance 为 0 到 1；没有明确议价时 trade_proposal 必须为 {""kind"":""none"",""percent"":0,""target_amount"":null,""explicit"":false,""reason"":""""}。没有对应行为时，三个新增 proposal 的 explicit 和 accepted 都必须为 false。";
+必须只返回一个 JSON 对象。字段严格为：npc_reply（字符串）、conversation_mode（continue 或 return_to_task）、topic（字符串）、task_relevance（0 到 1）、mood（字符串）、signals（对象，含 warmth、respect、trust、offense、threat、cooperation、credibility、trade_willingness 八个整数）、memory_candidates（数组，元素含 kind、summary、importance）、trade_proposal（对象，含 kind、percent、target_amount、explicit、reason）、wallet_transfer（对象，含 explicit、accepted、amount、source、reason）、procurement_proposal（对象，含 explicit、accepted、category、category_confidence、clarification_needed、requested_description、due_in_days、promised_premium_percent、reason）、return_visit_proposal（对象，含 explicit、accepted、due_in_days、reason）、carried_inventory_proposal（对象，含 explicit、accepted、reason）、barter_proposal（对象，含 explicit、accepted、client_item_runtime_key、client_item_name、required_player_item_runtime_key、required_player_item_runtime_keys、required_player_item_key、required_player_item_name、required_player_item_keys、required_player_item_names、reason）、third_party_task（对象，含 explicit、accepted、target_character_key、target_display_name、purpose、due_in_days、reason、decision）。
+所有 signals 值必须为 -2 到 2 的整数；importance 为 0 到 1；没有明确议价时 trade_proposal 必须为 {""kind"":""none"",""percent"":0,""target_amount"":null,""explicit"":false,""reason"":""""}。没有对应行为时，新增 proposal 的 explicit 和 accepted 都必须为 false。";
 
     private const string ThirdPartyTaskRules = "third_party_task 只用于玩家明确请当前人物联系另一个已知人物，且人物在 npc_reply 中明确答应；目标人物必须来自原版上下文或 gm_knowledge，不得创造身份。";
 

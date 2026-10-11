@@ -25,9 +25,38 @@ public static class GmModificationEngine
                 x.StartDay == state.CurrentDay);
             if (existing is not null)
             {
-                existing.Value = proposal.Operation.Equals("replace", StringComparison.OrdinalIgnoreCase)
+                var nextValue = proposal.Operation.Equals("replace", StringComparison.OrdinalIgnoreCase)
                     ? value : Math.Clamp(existing.Value + value, -0.50, 0.50);
-                existing.DurationDays = Math.Max(existing.DurationDays, proposal.DurationDays);
+                var nextDuration = proposal.Operation.Equals("replace", StringComparison.OrdinalIgnoreCase)
+                    ? proposal.DurationDays
+                    : existing.DurationDays == 0 || proposal.DurationDays == 0
+                        ? 0
+                        : Math.Max(existing.DurationDays, proposal.DurationDays);
+                var nextTitle = Clip(proposal.Title, existing.Title);
+                var nextSummary = Clip(proposal.Summary, existing.Summary);
+                var nextEvidence = Clip(proposal.Evidence, existing.Evidence);
+                var changed = Math.Abs(existing.Value - nextValue) >= 0.0001 ||
+                               existing.DurationDays != nextDuration ||
+                               !existing.Title.Equals(nextTitle, StringComparison.Ordinal) ||
+                               !existing.Summary.Equals(nextSummary, StringComparison.Ordinal) ||
+                               !existing.Evidence.Equals(nextEvidence, StringComparison.Ordinal);
+                existing.Value = nextValue;
+                existing.DurationDays = nextDuration;
+                existing.Title = nextTitle;
+                existing.Summary = nextSummary;
+                existing.Evidence = nextEvidence;
+                if (changed)
+                {
+                    state.News.Add(new NewsRecord
+                    {
+                        Day = state.CurrentDay,
+                        Title = Clip(proposal.Title, existing.Title),
+                        Body = $"{Clip(proposal.Summary, existing.Summary)}（影响：{field} {nextValue:+0.##;-0.##;0}，{FormatDuration(state.CurrentDay, nextDuration)}）",
+                        Importance = 2,
+                        SourceEventKey = "gm:" + key
+                    });
+                    applied++;
+                }
                 continue;
             }
             state.ActiveModifications.Add(new WorldModificationState
@@ -44,7 +73,7 @@ public static class GmModificationEngine
                 continue;
             }
             state.News.Add(new NewsRecord { Day = state.CurrentDay, Title = Clip(proposal.Title, "世界变化"),
-                Body = $"{Clip(proposal.Summary, "世界状态已调整。")}（影响：{field} {value:+0.##;-0.##;0}，至第 {state.CurrentDay + proposal.DurationDays - 1} 天）",
+                Body = $"{Clip(proposal.Summary, "世界状态已调整。")}（影响：{field} {value:+0.##;-0.##;0}，{FormatDuration(state.CurrentDay, proposal.DurationDays)}）",
                 Importance = 2, SourceEventKey = "gm:" + key });
             applied++;
         }
@@ -66,4 +95,9 @@ public static class GmModificationEngine
 
     private static string Clip(string? value, string fallback) =>
         string.IsNullOrWhiteSpace(value) ? fallback : value.Trim()[..Math.Min(value.Trim().Length, 180)];
+
+    private static string FormatDuration(int startDay, int durationDays) =>
+        durationDays == 0
+            ? "永久"
+            : $"至第 {startDay + durationDays - 1} 天";
 }

@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using AIWorldPawnshop.Models;
 
 namespace AIWorldPawnshop.Runtime;
@@ -197,7 +199,7 @@ public sealed class LocalFallbackEngine
 
         var selected = candidates.Count == 0
             ? new LocalReply { Reply = "客人看了你一眼，示意你继续谈眼前的事。" }
-            : candidates[Math.Abs(HashCode.Combine(request.CharacterKey, request.TurnId)) % candidates.Count];
+            : candidates[StableIndex($"reply:{request.CharacterKey}:{request.TurnId}", candidates.Count)];
 
         return new ConversationResponse
         {
@@ -219,10 +221,10 @@ public sealed class LocalFallbackEngine
         if (_content.FallbackEvents.Count == 0)
             return Array.Empty<WorldEventState>();
 
-        var seed = HashCode.Combine(state.WorldId, day, state.RulesVersion);
-        var index = Math.Abs(seed) % _content.FallbackEvents.Count;
+        var seed = $"event:{state.WorldId}:{day}:{state.RulesVersion}";
+        var index = StableIndex(seed, _content.FallbackEvents.Count);
         var templates = new List<LocalEventTemplate> { _content.FallbackEvents[index] };
-        if (_content.FallbackEvents.Count > 1 && Math.Abs(seed / 7) % 3 == 0)
+        if (_content.FallbackEvents.Count > 1 && StableIndex(seed + ":extra", 3) == 0)
             templates.Add(_content.FallbackEvents[(index + 1) % _content.FallbackEvents.Count]);
 
         return templates.Select(template => new WorldEventState
@@ -238,6 +240,18 @@ public sealed class LocalFallbackEngine
                 SupplyModifier = Math.Clamp(template.SupplyModifier, -0.3, 0.3),
                 NewsImportance = Math.Clamp(template.NewsImportance, 0, 100)
         }).ToList();
+    }
+
+    private static int StableIndex(string seed, int exclusiveMax)
+    {
+        if (exclusiveMax <= 1)
+            return 0;
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(seed));
+        var value = ((uint)hash[0] << 24) |
+                    ((uint)hash[1] << 16) |
+                    ((uint)hash[2] << 8) |
+                    hash[3];
+        return (int)(value % (uint)exclusiveMax);
     }
 
     private static string ClassifyTopic(string text, int offTopicStreak)

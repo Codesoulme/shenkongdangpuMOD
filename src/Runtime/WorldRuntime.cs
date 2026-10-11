@@ -88,7 +88,9 @@ public sealed class WorldRuntime
                 if (response is not null)
                     MelonLogger.Msg($"[当铺世界] 模型已回复，角色 {request.CharacterKey}");
 
-                if (response is not null && _modelProvider is OpenAiCompatibleProvider gmProvider)
+                if (response is not null &&
+                    _modelProvider is OpenAiCompatibleProvider gmProvider &&
+                    ShouldRunGmReview(request, response))
                 {
                     var gm = await gmProvider.CompleteGmAsync(request, response, cancellationToken).ConfigureAwait(false);
                     if (gm is not null)
@@ -279,7 +281,8 @@ public sealed class WorldRuntime
         var decision = proposal.Decision.Trim().ToLowerInvariant();
         var pending = State.ThirdPartyTasks.FirstOrDefault(x =>
             x.TargetCharacterKey.Equals(request.CharacterKey, StringComparison.OrdinalIgnoreCase) &&
-            x.Status.Equals("accepted", StringComparison.OrdinalIgnoreCase));
+            (x.Status.Equals("accepted", StringComparison.OrdinalIgnoreCase) ||
+             x.Status.Equals("proposed", StringComparison.OrdinalIgnoreCase)));
         if (pending is not null && (decision is "accept" or "accepted" or "reject" or "rejected"))
         {
             pending.Status = decision.StartsWith("accept", StringComparison.OrdinalIgnoreCase) ? "fulfilled" : "declined";
@@ -288,16 +291,19 @@ public sealed class WorldRuntime
                 : $"{pending.TargetDisplayName}拒绝了联系请求。";
             return;
         }
-        if (!proposal.Explicit || !proposal.Accepted || string.IsNullOrWhiteSpace(proposal.TargetCharacterKey) || string.IsNullOrWhiteSpace(proposal.Purpose))
+        if (!proposal.Explicit || !proposal.Accepted ||
+            (string.IsNullOrWhiteSpace(proposal.TargetCharacterKey) &&
+             string.IsNullOrWhiteSpace(proposal.TargetDisplayName)) ||
+            string.IsNullOrWhiteSpace(proposal.Purpose))
             return;
-        if (proposal.TargetCharacterKey.Equals(request.CharacterKey, StringComparison.OrdinalIgnoreCase))
+        if (!TryResolveThirdPartyTarget(State, proposal, out var targetKey, out var targetName))
             return;
-        if (!State.Characters.ContainsKey(proposal.TargetCharacterKey) &&
-            !State.Characters.Values.Any(x => x.DisplayName.Equals(proposal.TargetDisplayName, StringComparison.OrdinalIgnoreCase)))
+        if (targetKey.Equals(request.CharacterKey, StringComparison.OrdinalIgnoreCase))
             return;
+        var dueInDays = Math.Clamp(proposal.DueInDays, 1, 7);
         var existing = State.ThirdPartyTasks.FirstOrDefault(x =>
             x.SourceCharacterKey.Equals(request.CharacterKey, StringComparison.OrdinalIgnoreCase) &&
-            x.TargetCharacterKey.Equals(proposal.TargetCharacterKey, StringComparison.OrdinalIgnoreCase) &&
+            x.TargetCharacterKey.Equals(targetKey, StringComparison.OrdinalIgnoreCase) &&
             x.Status is "proposed" or "accepted");
         if (existing is not null) return;
         var queueScheduled = false;
@@ -307,8 +313,8 @@ public sealed class WorldRuntime
             if (playerStore is not null)
                 queueScheduled = NativeReturnVisitAdapter.QueueIfMissing(
                     playerStore,
-                    proposal.TargetCharacterKey.Trim(),
-                    proposal.DueInDays);
+                    targetKey,
+                    dueInDays);
         }
         catch (Exception ex)
         {
@@ -317,17 +323,44 @@ public sealed class WorldRuntime
         State.ThirdPartyTasks.Add(new ThirdPartyTaskState
         {
             SourceCharacterKey = request.CharacterKey,
-            TargetCharacterKey = proposal.TargetCharacterKey.Trim(),
-            TargetDisplayName = proposal.TargetDisplayName.Trim(),
+            TargetCharacterKey = targetKey,
+            TargetDisplayName = targetName,
             Purpose = proposal.Purpose.Trim()[..Math.Min(proposal.Purpose.Trim().Length, 180)],
             CreatedDay = State.CurrentDay,
-            DueDay = State.CurrentDay + proposal.DueInDays,
+            DueDay = State.CurrentDay + dueInDays,
             Status = queueScheduled ? "accepted" : "proposed",
             NativeQueueScheduled = queueScheduled,
             OutcomeSummary = queueScheduled
                 ? $"{request.CharacterDisplayName}答应联系{proposal.TargetDisplayName}：{proposal.Purpose}"
                 : $"{request.CharacterDisplayName}答应尝试联系{proposal.TargetDisplayName}，等待原版来客路径确认。"
         });
+    }
+
+    public static bool TryResolveThirdPartyTarget(
+        WorldState state,
+        ThirdPartyTaskProposal proposal,
+        out string targetKey,
+        out string targetName)
+    {
+        targetKey = proposal.TargetCharacterKey.Trim();
+        if (!state.Characters.ContainsKey(targetKey))
+        {
+            targetKey = state.Characters.Values
+                .FirstOrDefault(x => x.DisplayName.Equals(
+                    proposal.TargetDisplayName,
+                    StringComparison.OrdinalIgnoreCase))?
+                .CharacterKey ?? string.Empty;
+        }
+        if (string.IsNullOrWhiteSpace(targetKey))
+        {
+            targetName = string.Empty;
+            return false;
+        }
+
+        targetName = state.Characters.TryGetValue(targetKey, out var targetCharacter)
+            ? FirstNotBlank(proposal.TargetDisplayName, targetCharacter.DisplayName, targetKey)
+            : FirstNotBlank(proposal.TargetDisplayName, targetKey);
+        return true;
     }
 
     public bool ApplyNativeConversationActions(
@@ -426,10 +459,15 @@ public sealed class WorldRuntime
 
         State.ActiveEvents.RemoveAll(x => State.CurrentDay >= x.StartDay + x.DurationDays);
         State.ActiveModifications.RemoveAll(x => x.DurationDays > 0 && State.CurrentDay >= x.StartDay + x.DurationDays);
-        foreach (var task in State.ThirdPartyTasks.Where(x => x.Status.Equals("accepted", StringComparison.OrdinalIgnoreCase) && State.CurrentDay > x.DueDay))
+        foreach (var task in State.ThirdPartyTasks.Where(x =>
+                     (x.Status.Equals("accepted", StringComparison.OrdinalIgnoreCase) ||
+                      x.Status.Equals("proposed", StringComparison.OrdinalIgnoreCase)) &&
+                     State.CurrentDay > x.DueDay))
         {
             task.Status = "expired";
-            task.OutcomeSummary = "联系安排超过期限，未得到回应。";
+            task.OutcomeSummary = task.NativeQueueScheduled
+                ? "联系安排超过期限，未得到回应。"
+                : "联系任务未能进入原版来客队列，已超过等待期限。";
         }
         NativeReturnVisitAdapter.DeferMissedVisits(State);
         NativeProcurementAdapter.ResolveDueRequests(State);
@@ -613,6 +651,38 @@ public sealed class WorldRuntime
             ? new OpenAiCompatibleProvider(_httpClient, profile)
             : null;
     }
+
+    private static bool ShouldRunGmReview(
+        ConversationRequest request,
+        ConversationResponse response)
+    {
+        if (response.WorldModifications.Count > 0 ||
+            response.TradeProposal.Explicit ||
+            response.WalletTransfer.Explicit ||
+            response.ProcurementProposal.Explicit ||
+            response.ReturnVisitProposal.Explicit ||
+            response.CarriedInventoryProposal.Explicit ||
+            response.BarterProposal.Explicit ||
+            response.ThirdPartyTask.Explicit)
+            return true;
+
+        // A free-chat turn can describe a world consequence before the
+        // character model has emitted a structured proposal. Keep those turns
+        // under GM review without paying the second request for ordinary talk.
+        // The player's words are the causal input for a world change.  A
+        // character's ordinary reply can mention words such as “market” or
+        // “impact” without proposing any state change; including it here
+        // caused needless serial GM requests during casual chat.
+        return ContainsAny(request.PlayerText,
+            "价格", "价钱", "折扣", "加价", "优惠", "交换", "补付", "信用点",
+            "找货", "寻找", "带来", "回访", "再来", "联系", "任务",
+            "警察", "巡逻", "小偷", "偷窃", "盗窃", "失窃", "警报", "防盗",
+            "保险", "新闻", "供应", "供给", "需求", "市场", "缺货", "涨价",
+            "降价", "事件", "影响", "改变");
+    }
+
+    private static bool ContainsAny(string value, params string[] terms) =>
+        terms.Any(term => value.Contains(term, StringComparison.OrdinalIgnoreCase));
 
     private void ApplyConversationResult(ConversationRequest request, ConversationResponse response)
     {

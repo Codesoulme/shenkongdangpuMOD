@@ -19,6 +19,7 @@ internal static class NativeBarterAdapter
     private static BarterExecutionSnapshot? _execution;
     private static bool _uiRefreshPending;
     private static int _uiRefreshAttempts;
+    private const int MaxUiRefreshAttempts = 45;
 
     internal static bool HasActiveExecution => _execution is not null;
 
@@ -329,7 +330,7 @@ internal static class NativeBarterAdapter
         if (!_uiRefreshPending || _execution is null)
             return;
 
-        if (_uiRefreshAttempts++ >= 6)
+        if (_uiRefreshAttempts++ >= MaxUiRefreshAttempts)
         {
             _uiRefreshPending = false;
             MelonLogger.Warning("[当铺世界] 交换 UI 多次刷新仍未完成");
@@ -353,10 +354,12 @@ internal static class NativeBarterAdapter
             if (negotiation is null)
                 return false;
 
-            negotiation.InitUIWithItemBarterMode();
+            // RefreshUI dispatches through the customer's current intent and
+            // may finish by applying the old sell/buy layout.  Apply the
+            // explicit barter layout last so the accepted offer is visible in
+            // the same frame instead of waiting for another item placement.
             negotiation.RefreshUI();
-            if (_uiRefreshAttempts >= 2)
-                _uiRefreshPending = false;
+            negotiation.InitUIWithItemBarterMode();
             return true;
         }
         catch (Exception ex)
@@ -429,7 +432,11 @@ internal static class NativeBarterAdapter
         {
             NativeWalletAdapter.CancelPending(execution.ClientKey);
             MelonLogger.Warning(
-                $"[当铺世界] 交换确认未完成全部物品阶段，补款未执行：{execution.FailureReason}");
+                $"[当铺世界] 交换确认未完成全部物品阶段，补款未执行：" +
+                $"售出记录={execution.ItemsSoldHandled}, " +
+                $"顾客归属={execution.FrontOwnershipHandled}, " +
+                $"玩家归属={execution.BackOwnershipHandled}, " +
+                $"转移={execution.SwapHandled}，{execution.FailureReason}");
             return;
         }
 
@@ -566,12 +573,20 @@ internal static class NativeBarterAdapter
         {
             var owner = offer?.ownerClient;
             var ownerKey = FirstNotBlank(owner?.identifier, owner?.displayName);
-            return owner is not null &&
-                   ownerKey.Equals(execution.ClientKey, StringComparison.OrdinalIgnoreCase) &&
-                   string.Equals(
-                        Safe(() => offer!.barterTextBody, string.Empty),
-                       $"用{string.Join("、", execution.PlayerItemNames)}交换{execution.ClientItemName}",
-                       StringComparison.Ordinal);
+            if (owner is null ||
+                !ownerKey.Equals(execution.ClientKey, StringComparison.OrdinalIgnoreCase))
+                return false;
+
+            var expectedBody =
+                $"用{string.Join("、", execution.PlayerItemNames)}交换{execution.ClientItemName}";
+            var actualBody = Safe(() => offer!.barterTextBody, string.Empty);
+            // Mixed barter offers append a cash leg to the same native text.
+            // Match the exact item exchange prefix while allowing that known
+            // suffix; otherwise the native callback falls through to its
+            // all-items scan and the deferred wallet settlement is cancelled.
+            return actualBody.Equals(expectedBody, StringComparison.Ordinal) ||
+                   actualBody.StartsWith(expectedBody + "，并补付", StringComparison.Ordinal) ||
+                   actualBody.StartsWith(expectedBody + ",并补付", StringComparison.Ordinal);
         }
         catch
         {
