@@ -259,6 +259,10 @@ internal static class NativeBarterAdapter
             client.SetBarterOffer(offer);
             client.clientIntent = StoreClient.ClientIntent.BARTER;
             offer.InstanciateOffer();
+            // Instantiating the native offer rebuilds non-owned counter
+            // wrappers. Refresh that state before opening the negotiation UI so
+            // the player does not need to remove and re-place an item first.
+            playerStore.RefreshCounterItem();
             var negotiation = NegociationUIManager.Instance;
             negotiation?.InitUIWithItemBarterMode();
             negotiation?.RefreshUI();
@@ -295,11 +299,40 @@ internal static class NativeBarterAdapter
         }
         finally
         {
+            NativeWalletAdapter.CancelPending(_activeClientKey);
             _activeClientKey = string.Empty;
             _originalOffer = null;
             _execution = null;
         }
         return true;
+    }
+
+    /// <summary>
+    /// Commits a mixed barter's wallet leg only after the native accept path has
+    /// completed all exact-item transfer hooks. A cancelled or failed offer
+    /// clears the reservation without touching either balance.
+    /// </summary>
+    public static void CompleteAcceptedTransaction()
+    {
+        var execution = _execution;
+        if (execution is null)
+            return;
+
+        var complete = !execution.Failed &&
+                       execution.ItemsSoldHandled &&
+                       execution.FrontOwnershipHandled &&
+                       execution.BackOwnershipHandled &&
+                       execution.SwapHandled;
+        if (!complete)
+        {
+            NativeWalletAdapter.CancelPending(execution.ClientKey);
+            MelonLogger.Warning(
+                $"[当铺世界] 交换确认未完成全部物品阶段，补款未执行：{execution.FailureReason}");
+            return;
+        }
+
+        if (!NativeWalletAdapter.CommitPending(execution.ClientKey))
+            MelonLogger.Warning("[当铺世界] 交换物已成交，但确认后的补款未执行");
     }
 
     /// <summary>

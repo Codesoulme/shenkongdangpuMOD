@@ -209,6 +209,7 @@ internal static class PlayerStoreAcceptBarterPatch
     {
         try
         {
+            NativeBarterAdapter.CompleteAcceptedTransaction();
             NativeBarterAdapter.RestoreOriginalIntent();
         }
         catch (System.Exception ex)

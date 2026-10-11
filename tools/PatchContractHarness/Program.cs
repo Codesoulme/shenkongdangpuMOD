@@ -39,6 +39,7 @@ var gameAssembly = AssemblyLoadContext.Default.LoadFromAssemblyPath(
 CheckNewsProjectionResultContract(modAssembly, gameAssembly, failures);
 CheckInitializationDoesNotPatchTwice(modAssembly, failures);
 CheckPhoneChoiceIsolationContract(modAssembly, failures);
+CheckDeferredBarterSettlementContract(modAssembly, failures);
 
 if (failures.Count > 0)
 {
@@ -120,6 +121,42 @@ static void CheckPhoneChoiceIsolationContract(
     {
         if (modAssembly.GetType(patchName, throwOnError: false) is null)
             failures.Add($"Missing phone lifecycle hide patch: {patchName}.");
+    }
+}
+
+static void CheckDeferredBarterSettlementContract(
+    Assembly modAssembly,
+    ICollection<string> failures)
+{
+    var walletApplication = modAssembly
+        .GetType("AIWorldPawnshop.Runtime.WalletTransferApplication", throwOnError: true)!;
+    if (walletApplication.GetProperty("Deferred", BindingFlags.Public | BindingFlags.Instance) is null)
+        failures.Add("WalletTransferApplication is missing the deferred settlement marker.");
+
+    var walletAdapter = modAssembly
+        .GetType("AIWorldPawnshop.Runtime.NativeWalletAdapter", throwOnError: true)!;
+    if (walletAdapter.GetMethod("CommitPending", BindingFlags.Public | BindingFlags.Static) is null)
+        failures.Add("NativeWalletAdapter is missing CommitPending for accepted barter settlement.");
+
+    var barterAdapter = modAssembly
+        .GetType("AIWorldPawnshop.Runtime.NativeBarterAdapter", throwOnError: true)!;
+    var complete = barterAdapter.GetMethod(
+        "CompleteAcceptedTransaction",
+        BindingFlags.Public | BindingFlags.Static);
+    if (complete is null)
+    {
+        failures.Add("NativeBarterAdapter is missing the post-accept settlement hook.");
+        return;
+    }
+
+    var acceptPatch = modAssembly
+        .GetType("AIWorldPawnshop.PlayerStoreAcceptBarterPatch", throwOnError: true)!;
+    var postfix = acceptPatch.GetMethod("Postfix", BindingFlags.NonPublic | BindingFlags.Static)!;
+    if (!EnumerateCalledMethods(postfix).Any(method =>
+            method.DeclaringType == barterAdapter &&
+            method.Name == complete.Name))
+    {
+        failures.Add("AcceptBarter Postfix does not commit deferred barter settlement.");
     }
 }
 

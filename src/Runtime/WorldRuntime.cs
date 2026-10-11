@@ -194,7 +194,11 @@ public sealed class WorldRuntime
                 walletSnapshot,
                 "wallet.transfer.native",
                 wallet.Message,
-                wallet.Applied ? EchoWeaveIntentStatus.Fulfilled : EchoWeaveIntentStatus.Rejected,
+                 wallet.Deferred
+                     ? EchoWeaveIntentStatus.Scheduled
+                     : wallet.Applied
+                         ? EchoWeaveIntentStatus.Fulfilled
+                         : EchoWeaveIntentStatus.Rejected,
                 new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
                 {
                     ["amount"] = wallet.Amount.ToString(System.Globalization.CultureInfo.InvariantCulture)
@@ -326,6 +330,7 @@ public sealed class WorldRuntime
             barter.Proposed &&
             !barter.Applied)
         {
+            NativeWalletAdapter.CancelPending(request.CharacterKey);
             response.NpcReply = ConversationActionResolver.NaturalBarterFailureReply;
         }
         if (barter.Proposed)
