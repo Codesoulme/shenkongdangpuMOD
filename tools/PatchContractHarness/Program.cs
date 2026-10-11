@@ -38,6 +38,7 @@ var gameAssembly = AssemblyLoadContext.Default.LoadFromAssemblyPath(
 
 CheckNewsProjectionResultContract(modAssembly, gameAssembly, failures);
 CheckInitializationDoesNotPatchTwice(modAssembly, failures);
+CheckPhoneChoiceIsolationContract(modAssembly, failures);
 
 if (failures.Count > 0)
 {
@@ -87,6 +88,38 @@ static void CheckInitializationDoesNotPatchTwice(
         failures.Add(
             "OnInitializeMelon calls Harmony.PatchAll even though MelonLoader already applies " +
             "attributed patches before invoking the mod initializer.");
+    }
+}
+
+static void CheckPhoneChoiceIsolationContract(
+    Assembly modAssembly,
+    ICollection<string> failures)
+{
+    var entryType = modAssembly
+        .GetType("AIWorldPawnshop.UI.NativeDialogEntry", throwOnError: true)!;
+    var attachPhone = entryType.GetMethod(
+        "AttachPhoneChoices",
+        BindingFlags.Public | BindingFlags.Static)!;
+    if (EnumerateCalledMethods(attachPhone).Any(method =>
+            method.DeclaringType == entryType && method.Name == "Attach"))
+    {
+        failures.Add(
+            "AttachPhoneChoices calls the shared native choice layout; phone free chat " +
+            "must use an isolated entry to avoid overlap with the end-call button.");
+    }
+
+    var requiredPatches = new[]
+    {
+        "AIWorldPawnshop.UI.NativePhoneEndConversationPatch",
+        "AIWorldPawnshop.UI.NativePhoneInterruptPatch",
+        "AIWorldPawnshop.UI.NativePhoneStopCallPatch",
+        "AIWorldPawnshop.UI.NativePhoneClosePatch",
+        "AIWorldPawnshop.UI.NativePhoneDialogEndPatch"
+    };
+    foreach (var patchName in requiredPatches)
+    {
+        if (modAssembly.GetType(patchName, throwOnError: false) is null)
+            failures.Add($"Missing phone lifecycle hide patch: {patchName}.");
     }
 }
 
