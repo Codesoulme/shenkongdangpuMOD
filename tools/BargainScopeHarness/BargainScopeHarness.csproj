@@ -1,0 +1,42 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net6.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <PlatformTarget>x64</PlatformTarget>
+    <GameDir Condition="'$(GameDir)' == ''">E:\SteamLibrary\steamapps\common\Probably Stolen Demo</GameDir>
+    <Il2CppDir>$(GameDir)\MelonLoader\Il2CppAssemblies</Il2CppDir>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="Assembly-CSharp">
+      <HintPath>$(Il2CppDir)\Assembly-CSharp.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Il2Cppmscorlib">
+      <HintPath>$(Il2CppDir)\Il2Cppmscorlib.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Il2CppInterop.Runtime">
+      <HintPath>$(GameDir)\MelonLoader\net6\Il2CppInterop.Runtime.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.CoreModule">
+      <HintPath>$(Il2CppDir)\UnityEngine.CoreModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Compile Include="..\..\src\Runtime\CounterOwnership.cs" Link="CounterOwnership.cs" />
+    <Compile Include="..\..\src\Runtime\LocalFallbackEngine.cs" Link="LocalFallbackEngine.cs" />
+    <Compile Include="..\..\src\Runtime\ProcurementRequestResolver.cs" Link="ProcurementRequestResolver.cs" />
+    <Compile Include="..\..\src\Runtime\ProcurementAccessPolicy.cs" Link="ProcurementAccessPolicy.cs" />
+    <Compile Include="..\..\src\Models\LocalContent.cs" Link="LocalContent.cs" />
+    <Compile Include="..\..\src\Models\WorldState.cs" Link="WorldState.cs" />
+    <Compile Include="..\..\src\ModConstants.cs" Link="ModConstants.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="..\..\src\Runtime\BargainScopeResolver.cs" Link="BargainScopeResolver.cs" />
+    <Compile Include="..\..\src\Runtime\TradeProposalResolver.cs" Link="TradeProposalResolver.cs" />
+    <Compile Include="..\..\src\Runtime\ConversationActionResolver.cs" Link="ConversationActionResolver.cs" />
+    <Compile Include="..\..\src\Models\ConversationModels.cs" Link="ConversationModels.cs" />
+  </ItemGroup>
+</Project>

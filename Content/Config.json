@@ -1,0 +1,29 @@
+{
+  "enabled": true,
+  "provider": "openai-compatible",
+  "base_url": "http://127.0.0.1:11434/v1",
+  "model": "local-model",
+  "protocol": "auto",
+  "api_key_env": "PAWN_SHOP_MODEL_KEY",
+  "timeout_ms": 60000,
+  "max_output_tokens": 500,
+  "allow_network": true,
+  "debug_log": false,
+  "show_exact_relationship_values": false,
+  "active_profile_id": "default",
+  "profiles": [
+    {
+      "id": "default",
+      "name": "默认接口",
+      "provider": "openai-compatible",
+      "base_url": "http://127.0.0.1:11434/v1",
+      "model": "local-model",
+      "protocol": "auto",
+      "api_key": "",
+      "api_key_env": "PAWN_SHOP_MODEL_KEY",
+      "timeout_ms": 60000,
+      "max_output_tokens": 500,
+      "allow_network": true
+    }
+  ]
+}

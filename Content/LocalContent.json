@@ -1,0 +1,52 @@
+{
+  "fallback_replies": [
+    {
+      "topic": "trade",
+      "reply": "先把这笔交易谈妥吧。价钱合适，我不会浪费你的时间。",
+      "mood": "calm",
+      "trade_willingness": 1
+    },
+    {
+      "topic": "personal",
+      "reply": "我记得你。至于更多的事，等我们把眼前的东西说清楚再谈。",
+      "mood": "friendly",
+      "trade_willingness": 0
+    },
+    {
+      "topic": "event",
+      "reply": "最近外面的风声确实不太平。价格会受影响，但我还没打算白白吃亏。",
+      "mood": "interested",
+      "trade_willingness": 0
+    },
+    {
+      "topic": "off_topic",
+      "reply": "这话题和今天的交易没什么关系。你决定好了吗？",
+      "mood": "impatient",
+      "trade_willingness": -1
+    }
+  ],
+  "fallback_events": [
+    {
+      "event_key": "local-medical-delay",
+      "title": "医疗物资运输延误",
+      "summary": "一批医疗物资迟迟没有抵达，附近诊所开始提前寻找替代货源。",
+      "item_group": "medical",
+      "duration_days": 2,
+      "price_modifier": 0.08,
+      "demand_modifier": 0.15,
+      "supply_modifier": -0.1,
+      "news_importance": 60
+    },
+    {
+      "event_key": "local-security-check",
+      "title": "安保巡查临时加强",
+      "summary": "安保部门在周边增加了临时巡查，几类交易开始受到额外关注。",
+      "item_group": "security",
+      "duration_days": 1,
+      "price_modifier": 0.0,
+      "demand_modifier": -0.05,
+      "supply_modifier": -0.05,
+      "news_importance": 55
+    }
+  ]
+}
