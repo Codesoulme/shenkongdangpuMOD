@@ -244,7 +244,16 @@ public sealed class ChatUiController
         ConversationRequest request,
         ConversationResponse response)
     {
-        if (runtime.ApplyNativeConversationActions(request, response))
+        var nativeActionsApplied = runtime.ApplyNativeConversationActions(request, response);
+        if (nativeActionsApplied && response.BarterProposal.Explicit)
+        {
+            // Opening a barter offer does not itself emit the model's reply;
+            // the native game only speaks when an item is placed. Keep the
+            // conversation reply in the normal presenter path immediately.
+            return new NativeTradeApplication();
+        }
+
+        if (nativeActionsApplied)
         {
             return new NativeTradeApplication
             {

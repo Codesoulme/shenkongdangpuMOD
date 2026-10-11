@@ -179,6 +179,18 @@ public sealed class WorldRuntime
         if (gmResult.Applied)
             _store.Log(gmResult.Message);
         var wallet = _capabilityAdapters.TransferWallet(request, response);
+        if (response.BarterProposal.Explicit &&
+            response.BarterProposal.Accepted &&
+            response.WalletTransfer.Explicit &&
+            response.WalletTransfer.Accepted &&
+            !wallet.Deferred)
+        {
+            // Do not open a mixed offer that displays a cash leg which could
+            // not be reserved from the customer's native budget.
+            response.BarterProposal.Accepted = false;
+            response.NpcReply = ConversationActionResolver.NaturalBarterFailureReply;
+            MelonLogger.Warning($"[当铺世界] 混合交换补款未登记，已拒绝交换：{wallet.Message}");
+        }
         if (wallet.Proposed)
         {
             MelonLogger.Msg($"[当铺世界] 顾客预算转账：{wallet.Message}");

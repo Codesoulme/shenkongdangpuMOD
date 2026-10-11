@@ -17,6 +17,8 @@ internal static class NativeBarterAdapter
     private static StoreClient.ClientIntent _originalIntent;
     private static BarterOffer? _originalOffer;
     private static BarterExecutionSnapshot? _execution;
+    private static bool _uiRefreshPending;
+    private static int _uiRefreshAttempts;
 
     internal static bool HasActiveExecution => _execution is not null;
 
@@ -133,6 +135,13 @@ internal static class NativeBarterAdapter
                 });
             }
             var requiredName = string.Join("、", requiredItems.Select(DisplayName));
+            var barterText = $"用{requiredName}交换{offeredName}";
+            if (response.WalletTransfer.Explicit &&
+                response.WalletTransfer.Accepted &&
+                response.WalletTransfer.Amount > 0)
+            {
+                barterText += $"，并补付{response.WalletTransfer.Amount}信用点";
+            }
 
             var acceptedText = string.IsNullOrWhiteSpace(response.NpcReply)
                 ? $"行，{requiredName}换{offeredName}。"
@@ -140,7 +149,7 @@ internal static class NativeBarterAdapter
             var offer = new BarterOffer
             {
                 ownerClient = client,
-                barterTextBody = $"用{requiredName}交换{offeredName}",
+                barterTextBody = barterText,
                 conditions = conditions,
                 acceptedResponse = acceptedText,
                 deniedResponse = $"这不是说好的{requiredName}。",
@@ -260,12 +269,12 @@ internal static class NativeBarterAdapter
             client.clientIntent = StoreClient.ClientIntent.BARTER;
             offer.InstanciateOffer();
             // Instantiating the native offer rebuilds non-owned counter
-            // wrappers. Refresh that state before opening the negotiation UI so
-            // the player does not need to remove and re-place an item first.
+            // wrappers. The negotiation manager can still be between its own
+            // rebuild callbacks here, so refresh once now and retry from the
+            // main update loop for the next few frames.
             playerStore.RefreshCounterItem();
-            var negotiation = NegociationUIManager.Instance;
-            negotiation?.InitUIWithItemBarterMode();
-            negotiation?.RefreshUI();
+            ScheduleUiRefresh();
+            TryRefreshUi();
             MelonLogger.Msg(
                 $"[当铺世界] 已进入原版交换流程：{requiredName} -> {offeredName}");
             return Result(true, true, $"已进入原版交换流程：{requiredName}换{offeredName}");
@@ -303,8 +312,101 @@ internal static class NativeBarterAdapter
             _activeClientKey = string.Empty;
             _originalOffer = null;
             _execution = null;
+            _uiRefreshPending = false;
+            _uiRefreshAttempts = 0;
         }
         return true;
+    }
+
+    /// <summary>
+    /// Retries the native barter UI after the offer is created.  The native
+    /// counter can rebuild its negotiation manager one frame after the offer
+    /// callback, which otherwise makes the player re-place an item to trigger
+    /// the same refresh.
+    /// </summary>
+    public static void Update()
+    {
+        if (!_uiRefreshPending || _execution is null)
+            return;
+
+        if (_uiRefreshAttempts++ >= 6)
+        {
+            _uiRefreshPending = false;
+            MelonLogger.Warning("[当铺世界] 交换 UI 多次刷新仍未完成");
+            return;
+        }
+
+        TryRefreshUi();
+    }
+
+    private static void ScheduleUiRefresh()
+    {
+        _uiRefreshPending = true;
+        _uiRefreshAttempts = 0;
+    }
+
+    private static bool TryRefreshUi()
+    {
+        try
+        {
+            var negotiation = NegociationUIManager.Instance;
+            if (negotiation is null)
+                return false;
+
+            negotiation.InitUIWithItemBarterMode();
+            negotiation.RefreshUI();
+            if (_uiRefreshAttempts >= 2)
+                _uiRefreshPending = false;
+            return true;
+        }
+        catch (Exception ex)
+        {
+            MelonLogger.Warning($"[当铺世界] 交换 UI 刷新等待下一帧：{ex.Message}");
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Keeps the game's normal placement flow, but replaces its generic
+    /// rejection line when the active offer belongs to this exact exchange.
+    /// </summary>
+    public static bool TryOverridePlacedItemResponse(
+        BarterOffer offer,
+        out string response)
+    {
+        response = string.Empty;
+        var execution = _execution;
+        if (execution is null || !IsMatchingNativeOffer(offer, execution))
+            return false;
+
+        try
+        {
+            var entry = EmporiumEntry.Instance;
+            if (entry is null)
+                return false;
+
+            var expectedKeys = execution.PlayerItemRuntimeKeys
+                .Where(key => key > 0)
+                .ToHashSet();
+            var placedOwned = ReadGridItems(entry.backInvinvElement)
+                .Where(item => TryReadOwnership(item, out var owned) && owned)
+                .ToList();
+            var exactItemsPresent = expectedKeys.Count > 0 &&
+                expectedKeys.All(key => placedOwned.Any(item => SafeRuntimeKey(item) == key));
+            var hasUnexpectedItem = placedOwned.Any(item =>
+                !expectedKeys.Contains(SafeRuntimeKey(item)));
+            if (placedOwned.Count > 0 && (!exactItemsPresent || hasUnexpectedItem))
+            {
+                response = $"这不是说好的{string.Join("、", execution.PlayerItemNames)}。";
+                return true;
+            }
+        }
+        catch (Exception ex)
+        {
+            MelonLogger.Warning($"[当铺世界] 校验交换放置物回复失败：{ex.Message}");
+        }
+
+        return false;
     }
 
     /// <summary>

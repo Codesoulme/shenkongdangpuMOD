@@ -244,6 +244,24 @@ internal static class BarterOfferOnBarterAcceptedPatch
     }
 }
 
+[HarmonyPatch(typeof(BarterOffer), nameof(BarterOffer.GetItemPlacedResponse))]
+internal static class BarterOfferGetItemPlacedResponsePatch
+{
+    private static void Postfix(BarterOffer __instance, ref string __result)
+    {
+        try
+        {
+            if (NativeBarterAdapter.TryOverridePlacedItemResponse(__instance, out var response))
+                __result = response;
+        }
+        catch (System.Exception ex)
+        {
+            MelonLoader.MelonLogger.Warning(
+                $"[当铺世界] 交换放置物回复覆盖失败：{ex.Message}");
+        }
+    }
+}
+
 [HarmonyPatch(typeof(EmporiumEntry), nameof(EmporiumEntry.TransferOwnershipFrontInv))]
 internal static class EmporiumEntryTransferOwnershipFrontInvPatch
 {

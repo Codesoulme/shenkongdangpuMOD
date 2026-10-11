@@ -442,7 +442,7 @@ internal static class NativeDialogEntry
                 24f,
                 anchorRect!.rect.height * Mathf.Abs(anchorRect.lossyScale.y));
             entry.transform.position = anchorRect.transform.position +
-                                       Vector3.up * (height + PhoneEntryGap);
+                                       Vector3.down * (height + PhoneEntryGap);
             entry.transform.rotation = anchorRect.transform.rotation;
             entry.transform.localScale = template.transform.localScale;
             entry.SetActive(true);

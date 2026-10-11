@@ -40,6 +40,7 @@ CheckNewsProjectionResultContract(modAssembly, gameAssembly, failures);
 CheckInitializationDoesNotPatchTwice(modAssembly, failures);
 CheckPhoneChoiceIsolationContract(modAssembly, failures);
 CheckDeferredBarterSettlementContract(modAssembly, failures);
+    CheckBarterPresentationContract(modAssembly, failures);
 
 if (failures.Count > 0)
 {
@@ -158,6 +159,23 @@ static void CheckDeferredBarterSettlementContract(
     {
         failures.Add("AcceptBarter Postfix does not commit deferred barter settlement.");
     }
+}
+
+static void CheckBarterPresentationContract(
+    Assembly modAssembly,
+    ICollection<string> failures)
+{
+    var barterAdapter = modAssembly
+        .GetType("AIWorldPawnshop.Runtime.NativeBarterAdapter", throwOnError: true)!;
+    if (barterAdapter.GetMethod("Update", BindingFlags.Public | BindingFlags.Static) is null)
+        failures.Add("NativeBarterAdapter is missing deferred native UI refresh support.");
+    if (barterAdapter.GetMethod("TryOverridePlacedItemResponse", BindingFlags.Public | BindingFlags.Static) is null)
+        failures.Add("NativeBarterAdapter is missing the exact wrong-item response override.");
+
+    var responsePatch = modAssembly
+        .GetType("AIWorldPawnshop.BarterOfferGetItemPlacedResponsePatch", throwOnError: true)!;
+    if (responsePatch.GetMethod("Postfix", BindingFlags.NonPublic | BindingFlags.Static) is null)
+        failures.Add("BarterOffer placed-item response patch is missing its Postfix.");
 }
 
 static IEnumerable<MethodBase> EnumerateCalledMethods(MethodInfo method)

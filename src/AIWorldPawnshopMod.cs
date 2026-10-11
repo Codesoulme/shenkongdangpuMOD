@@ -44,6 +44,7 @@ public sealed class AIWorldPawnshopMod : MelonMod
             return;
 
         NativeDialogEntry.Update();
+        NativeBarterAdapter.Update();
         _modelSettingsUi?.Update(_runtime);
         _ui?.Update(_runtime);
         _chatUi?.Update(_runtime);
