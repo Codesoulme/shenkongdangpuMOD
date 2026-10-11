@@ -320,17 +320,13 @@ internal static class NativeDialogEntry
         {
             var phone = PhoneUIManager.Instance;
             if (!IsAlive(manager) || !IsAlive(phone) ||
-                phone!.currentPhoneClient is null ||
-                !manager!.gameObject.activeInHierarchy)
+                phone!.currentPhoneClient is null)
                 return false;
 
-            // The flag and current dialog identify a connected phone flow.  The
-            // active native choice is the final gate, so an old choice list can
-            // never resurrect the custom button during dialing or after hangup.
-            if (manager.isConversationActiveFlag == 0 || manager.currentDialog is null)
-                return false;
-
-            return HasActiveNativeChoice(manager.dialogChoiceBubbles);
+            // The native end-call choice is the authoritative connected-state
+            // signal.  The manager flag/currentDialog are not stable during the
+            // transition into a phone choice and made the custom entry vanish.
+            return HasActiveNativeChoice(manager!.dialogChoiceBubbles);
         }
         catch
         {
