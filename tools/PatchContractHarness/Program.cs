@@ -42,7 +42,7 @@ CheckWorldEconomyProjectionContract(modAssembly, failures);
 CheckInitializationDoesNotPatchTwice(modAssembly, failures);
 CheckPhoneChoiceIsolationContract(modAssembly, failures);
 CheckDeferredBarterSettlementContract(modAssembly, failures);
-    CheckBarterPresentationContract(modAssembly, failures);
+CheckBarterPresentationContract(modAssembly, failures);
 
 if (failures.Count > 0)
 {
@@ -215,6 +215,19 @@ static void CheckBarterPresentationContract(
         failures.Add("NativeBarterAdapter is missing deferred native UI refresh support.");
     if (barterAdapter.GetMethod("TryOverridePlacedItemResponse", BindingFlags.Public | BindingFlags.Static) is null)
         failures.Add("NativeBarterAdapter is missing the exact wrong-item response override.");
+
+    var refresh = barterAdapter.GetMethod(
+        "TryRefreshUi", BindingFlags.NonPublic | BindingFlags.Static)!;
+    var refreshCalls = EnumerateCalledMethods(refresh).Select(method => method.Name).ToList();
+    if (!refreshCalls.Contains("ClearUI") || !refreshCalls.Contains("UpdateUI"))
+        failures.Add("Barter UI refresh must clear the old offer and rebuild the current item layout.");
+    if (refreshCalls.Contains("InitUIWithItemBarterMode"))
+        failures.Add("Barter UI refresh initializes barter twice and can overlap the old offer.");
+
+    var apply = barterAdapter.GetMethod(
+        "ApplyConversation", BindingFlags.Public | BindingFlags.Static)!;
+    if (EnumerateCalledMethods(apply).Any(method => method.Name == "TryRefreshUi"))
+        failures.Add("Barter UI refresh runs before the native counter has settled for a frame.");
 
     var responsePatch = modAssembly
         .GetType("AIWorldPawnshop.BarterOfferGetItemPlacedResponsePatch", throwOnError: true)!;

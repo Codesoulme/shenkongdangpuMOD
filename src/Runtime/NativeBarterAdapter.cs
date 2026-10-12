@@ -269,13 +269,10 @@ internal static class NativeBarterAdapter
             client.SetBarterOffer(offer);
             client.clientIntent = StoreClient.ClientIntent.BARTER;
             offer.InstanciateOffer();
-            // Instantiating the native offer rebuilds non-owned counter
-            // wrappers. The negotiation manager can still be between its own
-            // rebuild callbacks here, so refresh once now and retry from the
-            // main update loop for the next few frames.
+            // The native offer and counter rebuild finish after this callback.
+            // Redraw from the update loop so the old quote is not left on top.
             playerStore.RefreshCounterItem();
             ScheduleUiRefresh();
-            TryRefreshUi();
             MelonLogger.Msg(
                 $"[当铺世界] 已进入原版交换流程：{requiredName} -> {offeredName}");
             return Result(true, true, $"已进入原版交换流程：{requiredName}换{offeredName}");
@@ -351,15 +348,19 @@ internal static class NativeBarterAdapter
         try
         {
             var negotiation = NegociationUIManager.Instance;
-            if (negotiation is null)
+            if (negotiation is null || negotiation.uiObject is null ||
+                !negotiation.uiObject.activeInHierarchy)
                 return false;
 
-            // RefreshUI dispatches through the customer's current intent and
-            // may finish by applying the old sell/buy layout.  Apply the
-            // explicit barter layout last so the accepted offer is visible in
-            // the same frame instead of waiting for another item placement.
-            negotiation.RefreshUI();
-            negotiation.InitUIWithItemBarterMode();
+            // Reproduce the native item-placement redraw. RefreshUI followed by
+            // InitUIWithItemBarterMode leaves the previous quote's text alive.
+            var item = negotiation.currentNegociatedItem;
+            negotiation.ClearUI();
+            if (item is null)
+                negotiation.UpdateUI();
+            else
+                negotiation.UpdateUI(item);
+            _uiRefreshPending = false;
             return true;
         }
         catch (Exception ex)
