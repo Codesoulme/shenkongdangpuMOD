@@ -120,15 +120,19 @@ internal static class TemporaryClientInventoryAdapter
                 return Result(true, false, "原版来客已经离开");
 
             var clientKey = FirstNotBlank(client.identifier, client.displayName);
+            var expectedKey = FirstNotBlank(
+                request.GameContext.Character.OriginalIdentifier,
+                request.GameContext.Character.Key,
+                request.CharacterKey);
+            if (string.IsNullOrWhiteSpace(clientKey) ||
+                !clientKey.Equals(expectedKey, StringComparison.OrdinalIgnoreCase))
+                return Result(true, false, "回复到达时来客已经改变");
+
             var state = world.CarriedInventories.LastOrDefault(x =>
                 x.VisitDay == world.CurrentDay &&
                 x.OriginalClientIdentifier.Equals(clientKey, StringComparison.OrdinalIgnoreCase));
             if (state is null || state.RuntimeItemKeys.Count == 0)
                 return Result(true, false, "这名买家本次没有可展示的临时随身物");
-
-            if (client.clientIntent == StoreClient.ClientIntent.BUY)
-                client.clientIntent = StoreClient.ClientIntent.SELLNBUY;
-            state.SellingUnlocked = true;
 
             GameItem? first = null;
             for (var i = 0; i < instance.gridInv.items.Count; i++)
@@ -143,10 +147,38 @@ internal static class TemporaryClientInventoryAdapter
             if (first is null)
                 return Result(true, false, "随身物已经不在顾客物品栏");
 
-            playerStore.AddDirectSellingItemToTable(first, false, false, true, 0);
-            playerStore.RefreshCounterItem();
-            NegociationUIManager.Instance?.RefreshUI();
-            MelonLogger.Msg($"[当铺世界] 顾客同意展示随身物：{clientKey} / {first.uniqueId}");
+            var itemKey = first.uniqueId;
+            var originalIntent = client.clientIntent;
+            var wasSellingUnlocked = state.SellingUnlocked;
+            try
+            {
+                if (originalIntent == StoreClient.ClientIntent.BUY)
+                    client.clientIntent = StoreClient.ClientIntent.SELLNBUY;
+                playerStore.AddDirectSellingItemToTable(first, false, false, true, 0);
+                state.SellingUnlocked = true;
+            }
+            catch
+            {
+                state.SellingUnlocked = wasSellingUnlocked;
+                try { client.clientIntent = originalIntent; }
+                catch (Exception ex)
+                {
+                    MelonLogger.Warning($"[当铺世界] 随身物摆放失败后无法恢复顾客来意：{ex.Message}");
+                }
+                throw;
+            }
+
+            try
+            {
+                playerStore.RefreshCounterItem();
+                NegociationUIManager.Instance?.RefreshUI();
+            }
+            catch (Exception ex)
+            {
+                // The item is already on the counter; keep the valid trade state.
+                MelonLogger.Warning($"[当铺世界] 随身物已摆出，但界面刷新失败：{ex.Message}");
+            }
+            MelonLogger.Msg($"[当铺世界] 顾客同意展示随身物：{clientKey} / {itemKey}");
             return Result(true, true, "已切换为原版买卖双向流程并摆出一件随身物");
         }
         catch (Exception ex)

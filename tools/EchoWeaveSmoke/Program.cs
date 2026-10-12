@@ -19,9 +19,11 @@ try
     DeduplicationKeyIsStable();
     LedgerRejectsDuplicateAndSurvivesCorruptTail();
     RuntimeRecoversUnfinishedConversation();
+    DuplicateConversationReplayFlow();
     StateRevisionIsMonotonic();
     GmModificationFlow();
     DailyEventFlow();
+    NamedCharacterPersistenceFlow();
     LocalFallbackConversationFlow();
     ModelProtocolCacheFlow();
     ModelTransientFailureDoesNotDoubleWaitFlow();
@@ -114,6 +116,69 @@ void StaleResponseStripsThirdPartyActionFlow()
     WorldRuntime.StripUnsafeWorldActions(response);
     Assert(!response.ThirdPartyTask.Explicit && !response.ThirdPartyTask.Accepted,
         "过期回复仍保留第三方联系动作。");
+}
+
+void NamedCharacterPersistenceFlow()
+{
+    var state = new WorldState { WorldId = "named-character-world", CurrentDay = 3 };
+    state.Characters["officer-lun"] = new CharacterState
+    {
+        CharacterKey = "officer-lun",
+        DisplayName = "伦警官",
+        OriginalIdentifier = "native-officer-lun",
+        OriginalRealName = "伦警官",
+        IsNamedSpecialCharacter = true,
+        Relationship = 12,
+        Memories = new List<MemoryRecord>
+        {
+            new() { Summary = "答应帮忙查看店铺周围的情况", CreatedDay = 3 }
+        }
+    };
+    state.Characters["juan"] = new CharacterState
+    {
+        CharacterKey = "juan",
+        DisplayName = "胡安",
+        Memories = new List<MemoryRecord>
+        {
+            new() { Summary = "讨论了进货", CreatedDay = 3 }
+        }
+    };
+    var nextDay = JsonSerializer.Deserialize<WorldState>(JsonSerializer.Serialize(state))!;
+    JsonFileStore.NormalizeLoadedWorld(nextDay, state.WorldId);
+    nextDay.CurrentDay++;
+    var restored = JsonSerializer.Deserialize<WorldState>(JsonSerializer.Serialize(nextDay))!;
+    JsonFileStore.NormalizeLoadedWorld(restored, state.WorldId);
+    var officer = restored.Characters["officer-lun"];
+    Assert(restored.CurrentDay == 4 &&
+           officer.OriginalIdentifier == "native-officer-lun" &&
+           officer.IsNamedSpecialCharacter && officer.Relationship == 12 &&
+           officer.Memories.Single().Summary == "答应帮忙查看店铺周围的情况" &&
+           restored.Characters["juan"].Memories.Single().Summary == "讨论了进货",
+        "跨天读取丢失命名人物身份、关系或专属记忆。");
+
+    var request = new ConversationRequest
+    {
+        CharacterKey = officer.CharacterKey,
+        GameContext = new GameConversationContext
+        {
+            Character = new NativeCharacterContext
+            {
+                Key = officer.CharacterKey,
+                DisplayName = officer.DisplayName,
+                OriginalIdentifier = officer.OriginalIdentifier,
+                OriginalRealName = officer.OriginalRealName,
+                IsNamedSpecialCharacter = true
+            }
+        }
+    };
+    var guard = typeof(WorldRuntime).Assembly.GetType(
+        "AIWorldPawnshop.Runtime.CharacterConsistencyGuard", throwOnError: true)!;
+    var check = guard.GetMethod("IsConsistent",
+        System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static)!;
+    var matching = new object?[] { request, new ConversationResponse { NpcReply = "我是伦警官。" }, null };
+    var conflicting = new object?[] { request, new ConversationResponse { NpcReply = "我是胡安。" }, null };
+    Assert((bool)check.Invoke(null, matching)! && !(bool)check.Invoke(null, conflicting)!,
+        "命名人物身份护栏未拦截冒用其他原版人物的回复。");
 }
 
 void CrossDayNewsProjectionFlow()
@@ -780,6 +845,34 @@ void RuntimeRecoversUnfinishedConversation()
     Assert(report.RecoveredCount == 1, "Restart did not find the unfinished conversation.");
     var afterRecovery = new IntentLedger(runtimeRoot, state.WorldId).Recover();
     Assert(afterRecovery.OpenIntents.Count == 0, "Recovered execution remained open.");
+}
+
+void DuplicateConversationReplayFlow()
+{
+    var runtimeRoot = Path.Combine(root, "duplicate-conversation");
+    var state = new WorldState { WorldId = "duplicate-world", CurrentDay = 2 };
+    var request = new ConversationRequest
+    {
+        ConversationId = "conversation-one",
+        TurnId = 1,
+        CharacterKey = "client-one",
+        Scene = "store"
+    };
+    var runtime = new EchoWeaveRuntime(runtimeRoot, state.WorldId);
+    var snapshot = runtime.Capture(request, state);
+    Assert(runtime.TryRecordConversation(snapshot, "首次回复"),
+        "首次回复未能登记执行。");
+    Assert(runtime.CompleteConversation(snapshot, EchoWeaveIntentStatus.Fulfilled, "已执行"),
+        "首次回复未能完成执行。");
+
+    var entryCount = runtime.Ledger.Entries.Count;
+    Assert(!runtime.TryRecordConversation(snapshot, "重复回复") &&
+           runtime.Ledger.Entries.Count == entryCount,
+        "相同回合重复返回时重新登记了执行。");
+    var restarted = new EchoWeaveRuntime(runtimeRoot, state.WorldId);
+    Assert(!restarted.TryRecordConversation(snapshot, "重启后重复回复") &&
+           restarted.Ledger.Entries.Count == entryCount,
+        "重启后相同回合重新登记了执行。");
 }
 
 static void Assert(bool condition, string message)

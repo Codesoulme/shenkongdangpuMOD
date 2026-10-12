@@ -645,6 +645,9 @@ public sealed class WorldRuntime
         var carried = barter.Applied
             ? new CarriedInventoryApplication()
             : _capabilityAdapters.RevealCarriedInventory(State, request, response);
+        if (!barter.Proposed && carried.Proposed &&
+            response.CarriedInventoryProposal.Accepted && !carried.Applied)
+            response.NpcReply = "抱歉，那件东西现在拿不出来，先别把它算进交易。";
         if (carried.Proposed)
             MelonLogger.Msg($"[当铺世界] 随身物对话：{carried.Message}");
         if (carried.Applied || barter.Applied)
