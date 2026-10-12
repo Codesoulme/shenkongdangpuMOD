@@ -24,6 +24,10 @@ try
     DailyEventFlow();
     LocalFallbackConversationFlow();
     ModelProtocolCacheFlow();
+    ModelTransientFailureDoesNotDoubleWaitFlow();
+    ModelUsesSparseConversationContractFlow();
+    ModelCasualTurnUsesCompactRequestFlow();
+    ModelDetailedTurnUsesScopedInstructionsFlow();
     GmReviewRoutingFlow();
     ThirdPartyTaskCanonicalizationFlow();
     ThirdPartyCapabilityMappingFlow();
@@ -422,7 +426,7 @@ void ModelProtocolCacheFlow()
         TurnId = 1,
         CharacterKey = "client-one",
         CharacterDisplayName = "测试顾客",
-        PlayerText = "今天天气怎么样？",
+        PlayerText = "请联系那位已知人物。",
         GameContext = new GameConversationContext
         {
             GmKnowledge = new List<string> { "GM_ONLY_KNOWLEDGE_MARKER" },
@@ -454,6 +458,166 @@ void ModelProtocolCacheFlow()
         "已确定可用协议后仍重复尝试失败协议，无法保证自由聊天速度。");
 }
 
+void ModelTransientFailureDoesNotDoubleWaitFlow()
+{
+    var handler = new TransientFailureHandler();
+    using var http = new HttpClient(handler);
+    var provider = new OpenAiCompatibleProvider(http, new ModelProfile
+    {
+        AllowNetwork = true,
+        BaseUrl = "http://mock.local/v1",
+        Model = "gpt-5-mini",
+        Protocol = "auto",
+        TimeoutMs = 5000,
+        MaxOutputTokens = 500
+    });
+
+    var response = provider.CompleteAsync(
+            new ConversationRequest { PlayerText = "你好" },
+            CancellationToken.None)
+        .GetAwaiter()
+        .GetResult();
+
+    Assert(response is null && handler.RequestCount == 1,
+        "上游临时故障不应触发另一协议并让玩家再等一次。 ");
+}
+
+void ModelUsesSparseConversationContractFlow()
+{
+    var handler = new ProtocolFallbackHandler();
+    using var http = new HttpClient(handler);
+    var provider = new OpenAiCompatibleProvider(http, new ModelProfile
+    {
+        AllowNetwork = true,
+        BaseUrl = "http://mock.local/v1",
+        Model = "gpt-5-mini",
+        Protocol = "chat_completions",
+        TimeoutMs = 5000,
+        MaxOutputTokens = 500
+    });
+
+    var response = provider.CompleteAsync(
+            new ConversationRequest { PlayerText = "你好" },
+            CancellationToken.None)
+        .GetAwaiter()
+        .GetResult();
+
+    var body = handler.RequestBodies.Single();
+    using var document = JsonDocument.Parse(body);
+    var prompt = document.RootElement
+        .GetProperty("messages")[0]
+        .GetProperty("content")
+        .GetString() ?? string.Empty;
+    Assert(response is not null &&
+           prompt.Contains("未发生的行为字段必须省略", StringComparison.Ordinal) &&
+           !prompt.Contains("没有有效委托时必须返回", StringComparison.Ordinal),
+        "人物请求仍强迫普通闲聊生成全部空提案，结构化输出负担没有降下来。 ");
+}
+
+void ModelCasualTurnUsesCompactRequestFlow()
+{
+    var handler = new ProtocolFallbackHandler();
+    using var http = new HttpClient(handler);
+    var provider = new OpenAiCompatibleProvider(http, new ModelProfile
+    {
+        AllowNetwork = true,
+        BaseUrl = "http://mock.local/v1",
+        Model = "gpt-5-mini",
+        Protocol = "chat_completions",
+        TimeoutMs = 5000,
+        MaxOutputTokens = 500
+    });
+
+    var request = new ConversationRequest
+    {
+        PlayerText = "今天天气怎么样？",
+        GameContext = new GameConversationContext
+        {
+            GmKnowledge = new List<string> { "GM_ONLY_MARKER" },
+            KnownCharacters = new List<KnownCharacterContext>
+            {
+                new() { Key = "LARGE_DIRECTORY_MARKER", DisplayName = "无关人物" }
+            },
+            Procurement = new ProcurementConversationContext
+            {
+                CategoryAccess = new List<ProcurementCategoryAccessContext>
+                {
+                    new() { Category = "LARGE_PROCUREMENT_MARKER" }
+                }
+            }
+        }
+    };
+    var response = provider.CompleteAsync(request, CancellationToken.None)
+        .GetAwaiter().GetResult();
+
+    using var document = JsonDocument.Parse(handler.RequestBodies.Single());
+    var messages = document.RootElement.GetProperty("messages");
+    var prompt = messages[0].GetProperty("content").GetString() ?? string.Empty;
+    var payload = messages[1].GetProperty("content").GetString() ?? string.Empty;
+    var maxTokens = document.RootElement.GetProperty("max_tokens").GetInt32();
+    Assert(response is not null &&
+           prompt.Contains("快速人物回复", StringComparison.Ordinal) &&
+           !payload.Contains("LARGE_DIRECTORY_MARKER", StringComparison.Ordinal) &&
+           !payload.Contains("LARGE_PROCUREMENT_MARKER", StringComparison.Ordinal) &&
+           !payload.Contains("GM_ONLY_MARKER", StringComparison.Ordinal) &&
+           maxTokens <= 220,
+        "普通闲聊没有使用精简提示、上下文和输出预算。 ");
+}
+
+void ModelDetailedTurnUsesScopedInstructionsFlow()
+{
+    var handler = new ProtocolFallbackHandler();
+    using var http = new HttpClient(handler);
+    var provider = new OpenAiCompatibleProvider(http, new ModelProfile
+    {
+        AllowNetwork = true,
+        BaseUrl = "http://mock.local/v1",
+        Model = "gpt-5-mini",
+        Protocol = "chat_completions",
+        TimeoutMs = 5000,
+        MaxOutputTokens = 500
+    });
+
+    var response = provider.CompleteAsync(
+            new ConversationRequest
+            {
+                PlayerText = "我用报纸换你的小瓶装水，你再补五信用点，行吗？",
+                GameContext = new GameConversationContext
+                {
+                    Procurement = new ProcurementConversationContext
+                    {
+                        RarityBasis = "IRRELEVANT_PROCUREMENT_MARKER"
+                    },
+                    KnownCharacters = new List<KnownCharacterContext>
+                    {
+                        new() { Key = "IRRELEVANT_DIRECTORY_MARKER" }
+                    }
+                }
+            },
+            CancellationToken.None)
+        .GetAwaiter()
+        .GetResult();
+
+    using var document = JsonDocument.Parse(handler.RequestBodies.Single());
+    var prompt = document.RootElement
+        .GetProperty("messages")[0]
+        .GetProperty("content")
+        .GetString() ?? string.Empty;
+    var payload = document.RootElement
+        .GetProperty("messages")[1]
+        .GetProperty("content")
+        .GetString() ?? string.Empty;
+    var maxTokens = document.RootElement.GetProperty("max_tokens").GetInt32();
+    Assert(response is not null &&
+           prompt.Contains("混合交换规则", StringComparison.Ordinal) &&
+           prompt.Contains("补付规则", StringComparison.Ordinal) &&
+           !prompt.Contains("未来找货规则", StringComparison.Ordinal) &&
+           !payload.Contains("IRRELEVANT_PROCUREMENT_MARKER", StringComparison.Ordinal) &&
+           !payload.Contains("IRRELEVANT_DIRECTORY_MARKER", StringComparison.Ordinal) &&
+           maxTokens <= 360,
+        "明确行为轮次仍携带无关能力说明或过高输出预算。 ");
+}
+
 void GmReviewRoutingFlow()
 {
     var method = typeof(WorldRuntime).GetMethod(
@@ -466,10 +630,31 @@ void GmReviewRoutingFlow()
     var casualNeedsGm = (bool)method!.Invoke(null, new object[] { casual, casualResponse })!;
     Assert(!casualNeedsGm, "普通自由聊天不应额外串行调用 GM。");
 
-    var worldChange = new ConversationRequest { PlayerText = "警察说这几天会多巡逻店附近。" };
-    var worldResponse = new ConversationResponse { NpcReply = "那偷窃风险会低些。" };
+    var worldChange = new ConversationRequest { PlayerText = "你能让人这几天多巡逻店附近吗？" };
+    var worldResponse = new ConversationResponse { NpcReply = "行，我会安排人手多巡逻几趟。" };
     var worldNeedsGm = (bool)method.Invoke(null, new object[] { worldChange, worldResponse })!;
     Assert(worldNeedsGm, "涉及世界状态因果的自由聊天必须进入 GM 审核。");
+
+    var marketQuestion = new ConversationRequest { PlayerText = "最近市场怎么样？" };
+    var marketAnswer = new ConversationResponse { NpcReply = "看起来还算平稳。" };
+    var questionNeedsGm = (bool)method.Invoke(null, new object[] { marketQuestion, marketAnswer })!;
+    Assert(!questionNeedsGm, "询问世界话题不应被误判为已承诺修改并串行调用 GM。 ");
+
+    var refusedPatrol = new ConversationResponse { NpcReply = "这事我安排不了。" };
+    var refusalNeedsGm = (bool)method.Invoke(null, new object[] { worldChange, refusedPatrol })!;
+    Assert(!refusalNeedsGm, "人物已拒绝世界请求时不应继续调用 GM。 ");
+
+    var unexpectedChange = new ConversationRequest { PlayerText = "能让钟声每天多响一次吗？" };
+    var unexpectedAccepted = new ConversationResponse
+    {
+        NpcReply = "可以，我会让钟声每天多响一次。",
+        RequiresGmReview = true
+    };
+    var unexpectedNeedsGm = (bool)method.Invoke(
+        null,
+        new object[] { unexpectedChange, unexpectedAccepted })!;
+    Assert(unexpectedNeedsGm,
+        "没有落入已知关键词、但人物明确答应改变世界状态的请求仍应进入 GM。 ");
 }
 
 void ThirdPartyTaskCanonicalizationFlow()
@@ -634,5 +819,24 @@ sealed class ProtocolFallbackHandler : HttpMessageHandler
                 Encoding.UTF8,
                 "application/json")
         };
+    }
+}
+
+sealed class TransientFailureHandler : HttpMessageHandler
+{
+    public int RequestCount { get; private set; }
+
+    protected override Task<HttpResponseMessage> SendAsync(
+        HttpRequestMessage request,
+        CancellationToken cancellationToken)
+    {
+        RequestCount++;
+        return Task.FromResult(new HttpResponseMessage(HttpStatusCode.BadGateway)
+        {
+            Content = new StringContent(
+                "{\"error\":{\"message\":\"temporary upstream failure\"}}",
+                Encoding.UTF8,
+                "application/json")
+        });
     }
 }

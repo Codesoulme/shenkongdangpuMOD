@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using AIWorldPawnshop.Models;
 using AIWorldPawnshop.Runtime;
 using Il2Cpp;
@@ -20,6 +21,7 @@ public sealed class ChatUiController
     private Task<ConversationResponse>? _pendingReply;
     private ConversationRequest? _pendingRequest;
     private int _requestGeneration;
+    private long _requestStartedTimestamp;
     private Action<string>? _replyPresenter;
     private bool _loggedFailure;
 
@@ -87,6 +89,7 @@ public sealed class ChatUiController
         _requestGeneration++;
         _pendingReply = null;
         _pendingRequest = null;
+        _requestStartedTimestamp = 0;
         _replyPresenter = null;
         _window?.Close();
         _window = null;
@@ -113,10 +116,14 @@ public sealed class ChatUiController
         _pendingText = string.Empty;
         _window?.Get("input")?.SetString(string.Empty);
 
+        _requestStartedTimestamp = Stopwatch.GetTimestamp();
+        var contextStarted = Stopwatch.GetTimestamp();
         var gameContext = runtime.BuildConversationContext(
             _scene,
             _characterKey,
             _characterName);
+        runtime.LogPerformance(
+            $"stage=context_build elapsed_ms={ElapsedMilliseconds(contextStarted)}");
         var contextCharacter = gameContext.Character;
         var authoritativeKey = string.IsNullOrWhiteSpace(contextCharacter.Key)
             ? _characterKey
@@ -156,6 +163,8 @@ public sealed class ChatUiController
 
         var task = _pendingReply;
         _pendingReply = null;
+        runtime.LogPerformance(
+            $"stage=ui_task_observed total_ms={ElapsedMilliseconds(_requestStartedTimestamp)}");
         try
         {
             var alreadyRecorded = false;
@@ -222,6 +231,9 @@ public sealed class ChatUiController
             if (tradeResult.Proposed && !tradeResult.Invoked)
                 MelonLogger.Msg($"[当铺世界] 对话议价未执行：{tradeResult.Message}");
             _window?.Get("send")?.SetText("发送");
+            runtime.LogPerformance(
+                $"stage=ui_presented total_ms={ElapsedMilliseconds(_requestStartedTimestamp)}");
+            _requestStartedTimestamp = 0;
         }
         catch (Exception ex)
         {
@@ -236,8 +248,14 @@ public sealed class ChatUiController
             }
             _pendingRequest = null;
             _window?.Get("send")?.SetText("发送");
+            _requestStartedTimestamp = 0;
         }
     }
+
+    private static long ElapsedMilliseconds(long startedTimestamp) =>
+        startedTimestamp <= 0
+            ? 0
+            : (long)((Stopwatch.GetTimestamp() - startedTimestamp) * 1000d / Stopwatch.Frequency);
 
     private static NativeTradeApplication ApplyLiveActions(
         WorldRuntime runtime,

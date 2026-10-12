@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using AIWorldPawnshop.Capabilities;
 using AIWorldPawnshop.Models;
 using AIWorldPawnshop.Models.EchoWeave;
@@ -69,6 +70,7 @@ public sealed class WorldRuntime
         ConversationRequest request,
         CancellationToken cancellationToken = default)
     {
+        var totalWatch = Stopwatch.StartNew();
         CaptureTurnSnapshot(request);
         ConversationResponse? response = null;
         var modelProvider = _modelProvider;
@@ -78,6 +80,9 @@ public sealed class WorldRuntime
             {
                 response = await modelProvider.CompleteAsync(request, cancellationToken)
                     .ConfigureAwait(false);
+                LogPerformance(
+                    $"stage=character_complete elapsed_ms={totalWatch.ElapsedMilliseconds} " +
+                    $"has_response={response is not null}");
                 if (response is not null &&
                     !CharacterConsistencyGuard.IsConsistent(request, response, out var conflict))
                 {
@@ -92,7 +97,11 @@ public sealed class WorldRuntime
                     _modelProvider is OpenAiCompatibleProvider gmProvider &&
                     ShouldRunGmReview(request, response))
                 {
+                    var gmWatch = Stopwatch.StartNew();
                     var gm = await gmProvider.CompleteGmAsync(request, response, cancellationToken).ConfigureAwait(false);
+                    LogPerformance(
+                        $"stage=gm_complete elapsed_ms={gmWatch.ElapsedMilliseconds} " +
+                        $"has_response={gm is not null}");
                     if (gm is not null)
                     {
                         response.WorldModifications = gm.WorldModifications;
@@ -140,7 +149,21 @@ public sealed class WorldRuntime
             }
         }
 
-        return response ?? _fallback.Reply(request);
+        var usedFallback = response is null;
+        response ??= _fallback.Reply(request);
+        LogPerformance(
+            $"stage=reply_ready total_ms={totalWatch.ElapsedMilliseconds} fallback={usedFallback}");
+        return response;
+    }
+
+    public void LogPerformance(string message)
+    {
+        if (!Config.DebugLog)
+            return;
+
+        var entry = $"[PERF-GMCHAT] {message}";
+        _store.Log(entry);
+        MelonLogger.Msg($"[当铺世界] {entry}");
     }
 
     public GameConversationContext BuildConversationContext(
@@ -999,7 +1022,7 @@ public sealed class WorldRuntime
         _modelProvider = Config.Enabled &&
                          profile.AllowNetwork &&
                          profile.Provider.Equals("openai-compatible", StringComparison.OrdinalIgnoreCase)
-            ? new OpenAiCompatibleProvider(_httpClient, profile)
+            ? new OpenAiCompatibleProvider(_httpClient, profile, LogPerformance)
             : null;
     }
 
@@ -1008,6 +1031,7 @@ public sealed class WorldRuntime
         ConversationResponse response)
     {
         if (response.WorldModifications.Count > 0 ||
+            response.RequiresGmReview ||
             response.TradeProposal.Explicit ||
             response.WalletTransfer.Explicit ||
             response.ProcurementProposal.Explicit ||
@@ -1017,19 +1041,28 @@ public sealed class WorldRuntime
             response.ThirdPartyTask.Explicit)
             return true;
 
-        // A free-chat turn can describe a world consequence before the
-        // character model has emitted a structured proposal. Keep those turns
-        // under GM review without paying the second request for ordinary talk.
-        // The player's words are the causal input for a world change.  A
-        // character's ordinary reply can mention words such as “market” or
-        // “impact” without proposing any state change; including it here
-        // caused needless serial GM requests during casual chat.
-        return ContainsAny(request.PlayerText,
-            "价格", "价钱", "折扣", "加价", "优惠", "交换", "补付", "信用点",
-            "找货", "寻找", "带来", "回访", "再来", "联系", "任务",
+        // An unstructured world change still needs review, but merely asking
+        // about police, prices, or the market does not. Require both a world
+        // target in the player's turn and an affirmative commitment in the
+        // character reply; refusals and informational chat stay one-request.
+        var hasWorldTarget = ContainsAny(request.PlayerText,
             "警察", "巡逻", "小偷", "偷窃", "盗窃", "失窃", "警报", "防盗",
             "保险", "新闻", "供应", "供给", "需求", "市场", "缺货", "涨价",
-            "降价", "事件", "影响", "改变");
+            "降价", "事件", "治安", "价格", "物价", "安全", "保护", "环境",
+            "情况", "生意", "客流", "库存", "以后", "长期", "永久", "这几天",
+            "最近", "附近", "店门", "店里", "城市", "街区");
+        if (!hasWorldTarget)
+            return false;
+
+        var accepted = ContainsAny(response.NpcReply,
+            "我会", "我们会", "我答应", "答应你", "给你安排", "替你安排",
+            "可以安排", "就这么办", "没问题", "行，我", "好，我", "当然可以");
+        if (!accepted)
+            return false;
+
+        return !ContainsAny(response.NpcReply,
+            "不会", "不能", "不行", "没法", "办不到", "做不到", "无法", "拒绝",
+            "不能答应", "无法保证", "不归我管");
     }
 
     private static bool ContainsAny(string value, params string[] terms) =>

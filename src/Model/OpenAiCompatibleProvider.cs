@@ -1,6 +1,8 @@
+using System.Diagnostics;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using AIWorldPawnshop.Models;
 using AIWorldPawnshop.Runtime;
 
@@ -11,16 +13,25 @@ public sealed class OpenAiCompatibleProvider : IModelProvider
     private const string AutoProtocol = "auto";
     private const string ChatCompletionsProtocol = "chat_completions";
     private const string ResponsesProtocol = "responses";
+    private static readonly JsonSerializerOptions OmitNullJsonOptions = new()
+    {
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+    };
 
     private readonly HttpClient _httpClient;
     private readonly ModelProfile _profile;
+    private readonly Action<string>? _performanceLog;
     private string? _resolvedProtocol;
 
-    public OpenAiCompatibleProvider(HttpClient httpClient, ModelProfile profile)
+    public OpenAiCompatibleProvider(
+        HttpClient httpClient,
+        ModelProfile profile,
+        Action<string>? performanceLog = null)
     {
         _httpClient = httpClient;
         _profile = profile.Clone();
         _profile.Normalize();
+        _performanceLog = performanceLog;
     }
 
     public async Task<ConversationResponse?> CompleteAsync(
@@ -31,6 +42,13 @@ public sealed class OpenAiCompatibleProvider : IModelProvider
             return null;
 
         var characterRequest = RemoveGmOnlyKnowledge(request);
+        var compact = !RequiresDetailedInstructions(characterRequest);
+        var systemPrompt = compact
+            ? CompactConversationSystemPrompt
+            : BuildDetailedConversationSystemPrompt(characterRequest);
+        var outputLimit = compact
+            ? Math.Min(_profile.MaxOutputTokens, 220)
+            : Math.Min(_profile.MaxOutputTokens, 360);
         RequestAttempt? lastAttempt = null;
         foreach (var protocol in GetRequestProtocolOrder())
         {
@@ -38,7 +56,11 @@ public sealed class OpenAiCompatibleProvider : IModelProvider
                     _profile,
                     protocol,
                     characterRequest,
-                    cancellationToken)
+                    cancellationToken,
+                    systemPrompt,
+                    outputLimit,
+                    compact,
+                    !compact)
                 .ConfigureAwait(false);
 
             if (lastAttempt.Response is not null)
@@ -123,7 +145,7 @@ public sealed class OpenAiCompatibleProvider : IModelProvider
                     protocol,
                     gmRequest,
                     cancellationToken,
-                    GmSystemPrompt,
+                    GmSystemPrompt + ThirdPartyTaskRules,
                     maxOutputTokens: Math.Min(_profile.MaxOutputTokens, 280))
                 .ConfigureAwait(false);
             if (attempt.Response is not null)
@@ -187,33 +209,46 @@ public sealed class OpenAiCompatibleProvider : IModelProvider
         ModelProfile profile,
         string protocol,
         ConversationRequest request,
-        CancellationToken cancellationToken)
-        => await SendConversationAsync(profile, protocol, request, cancellationToken, ConversationSystemPrompt).ConfigureAwait(false);
-
-    private async Task<RequestAttempt> SendConversationAsync(
-        ModelProfile profile,
-        string protocol,
-        ConversationRequest request,
         CancellationToken cancellationToken,
         string systemPrompt,
-        int? maxOutputTokens = null)
+        int? maxOutputTokens = null,
+        bool compactPayload = false,
+        bool scopedPayload = false)
     {
+        var watch = Stopwatch.StartNew();
+        var kind = systemPrompt.StartsWith("你是 GM", StringComparison.Ordinal)
+            ? "gm"
+            : compactPayload ? "character_compact" : "character_full";
         try
         {
             using var timeout = CreateTimeout(profile.TimeoutMs, cancellationToken);
+            var body = BuildConversationBody(
+                profile,
+                protocol,
+                request,
+                systemPrompt,
+                maxOutputTokens,
+                    compactPayload,
+                    scopedPayload);
             using var message = CreateMessage(
                 profile,
                 protocol,
-                BuildConversationBody(profile, protocol, request, systemPrompt, maxOutputTokens));
+                body);
+            var requestBytes = message.Content?.Headers.ContentLength ?? 0;
             using var response = await _httpClient
                 .SendAsync(message, HttpCompletionOption.ResponseHeadersRead, timeout.Token)
                 .ConfigureAwait(false);
+            var headersMs = watch.ElapsedMilliseconds;
             var responseBody = await response.Content
                 .ReadAsStringAsync(timeout.Token)
                 .ConfigureAwait(false);
+            var totalMs = watch.ElapsedMilliseconds;
 
             if (!response.IsSuccessStatusCode)
             {
+                ReportPerformance(
+                    $"kind={kind} protocol={protocol} request_bytes={requestBytes} " +
+                    $"headers_ms={headersMs} total_ms={totalMs} status={(int)response.StatusCode} parsed=false");
                 return RequestAttempt.Failure(
                     FormatHttpFailure((int)response.StatusCode, responseBody, protocol),
                     (int)response.StatusCode);
@@ -223,12 +258,20 @@ public sealed class OpenAiCompatibleProvider : IModelProvider
             var content = ExtractResponseContent(document.RootElement, protocol);
             if (string.IsNullOrWhiteSpace(content))
             {
+                ReportPerformance(
+                    $"kind={kind} protocol={protocol} request_bytes={requestBytes} " +
+                    $"headers_ms={headersMs} total_ms={totalMs} status={(int)response.StatusCode} " +
+                    $"response_chars={responseBody.Length} parsed=false");
                 return RequestAttempt.Failure(
                     $"{ProtocolLabel(protocol)} 已响应，但没有可读取的文本内容",
                     (int)response.StatusCode);
             }
 
             var parsed = ParseResponse(content);
+            ReportPerformance(
+                $"kind={kind} protocol={protocol} request_bytes={requestBytes} " +
+                $"headers_ms={headersMs} total_ms={totalMs} status={(int)response.StatusCode} " +
+                $"response_chars={responseBody.Length} parsed={parsed is not null}");
             return parsed is null
                 ? RequestAttempt.Failure(
                     $"{ProtocolLabel(protocol)} 已响应，但内容不是有效的当铺世界 JSON",
@@ -237,25 +280,46 @@ public sealed class OpenAiCompatibleProvider : IModelProvider
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
+            ReportPerformance(
+                $"kind={kind} protocol={protocol} total_ms={watch.ElapsedMilliseconds} status=timeout parsed=false");
             return RequestAttempt.Failure(
                 $"{ProtocolLabel(protocol)} 连接超时（{Math.Clamp(profile.TimeoutMs, 1000, 120000)} ms）",
                 null);
         }
         catch (OperationCanceledException)
         {
+            ReportPerformance(
+                $"kind={kind} protocol={protocol} total_ms={watch.ElapsedMilliseconds} status=cancelled parsed=false");
             return RequestAttempt.Failure("模型请求已取消", null);
         }
         catch (JsonException)
         {
+            ReportPerformance(
+                $"kind={kind} protocol={protocol} total_ms={watch.ElapsedMilliseconds} status=invalid_json parsed=false");
             return RequestAttempt.Failure(
                 $"{ProtocolLabel(protocol)} 已响应，但不是有效 JSON",
                 null);
         }
         catch (Exception ex)
         {
+            ReportPerformance(
+                $"kind={kind} protocol={protocol} total_ms={watch.ElapsedMilliseconds} " +
+                $"status={ex.GetType().Name} parsed=false");
             return RequestAttempt.Failure(
                 $"{ProtocolLabel(protocol)} 连接失败：{ShortenError(ex.Message)}",
                 null);
+        }
+    }
+
+    private void ReportPerformance(string message)
+    {
+        try
+        {
+            _performanceLog?.Invoke(message);
+        }
+        catch
+        {
+            // Performance diagnostics must never interfere with conversation.
         }
     }
 
@@ -322,22 +386,25 @@ public sealed class OpenAiCompatibleProvider : IModelProvider
         ModelProfile profile,
         string protocol,
         ConversationRequest request,
-        string systemPrompt = ConversationSystemPrompt,
-        int? maxOutputTokens = null)
+        string systemPrompt,
+        int? maxOutputTokens = null,
+        bool compactPayload = false,
+        bool scopedPayload = false)
     {
         var outputLimit = Math.Clamp(
             maxOutputTokens ?? profile.MaxOutputTokens,
             32,
             8000);
+        var requestJson = SerializeConversationRequest(request, compactPayload, scopedPayload);
         if (protocol == ResponsesProtocol)
         {
             return new
             {
                 model = profile.Model,
-                instructions = systemPrompt + ThirdPartyTaskRules +
+                instructions = systemPrompt +
                     "\nReturn a valid json object and do not wrap it in markdown.",
                 input = "Return a json object for this conversation:\n" +
-                    JsonSerializer.Serialize(request),
+                    requestJson,
                 max_output_tokens = outputLimit,
                 reasoning = new { effort = "low" },
                 text = new { format = new { type = "json_object" } }
@@ -350,8 +417,101 @@ public sealed class OpenAiCompatibleProvider : IModelProvider
             temperature = 0.7,
             max_tokens = outputLimit,
             response_format = new { type = "json_object" },
-            messages = BuildConversationMessages(request, systemPrompt + ThirdPartyTaskRules)
+            messages = BuildConversationMessages(requestJson, systemPrompt)
         };
+    }
+
+    private static string SerializeConversationRequest(
+        ConversationRequest request,
+        bool compact,
+        bool scoped)
+    {
+        if (!compact && !scoped)
+            return JsonSerializer.Serialize(request);
+
+        var context = request.GameContext;
+        var trade = context.Trade;
+        if (scoped)
+        {
+            var text = request.PlayerText;
+            var includeTrade = ContainsAny(text,
+                "价格", "价钱", "多少钱", "便宜", "贵", "折", "优惠", "加价", "报价",
+                "信用点", "预算", "补付", "付款", "支付", "给我", "买", "卖", "交易",
+                "交换", "换", "物品", "东西", "货", "随身", "price", "discount", "trade",
+                "barter", "buy", "sell", "pay", "swap", "exchange");
+            var includeProcurement = ContainsAny(text,
+                "找货", "寻找", "帮我找", "下次带", "以后带", "收购", "进货",
+                "find", "source", "procure");
+            var includeThirdParty = context.ThirdPartyTasks.Count > 0 ||
+                MentionsKnownCharacter(context.KnownCharacters, text) || ContainsAny(text,
+                    "联系", "通知", "转告", "传话", "找个人", "contact", "tell", "message");
+            var includeWorld = ContainsAny(text,
+                "警察", "巡逻", "小偷", "偷窃", "盗窃", "失窃", "警报", "防盗",
+                "保险", "新闻", "供应", "供给", "需求", "市场", "缺货", "涨价", "降价",
+                "事件", "治安", "物价", "安全", "保护", "环境", "情况", "生意", "客流",
+                "库存", "长期", "永久", "附近", "店门", "城市", "街区");
+
+            return JsonSerializer.Serialize(new
+            {
+                conversation_id = request.ConversationId,
+                turn_id = request.TurnId,
+                character_key = request.CharacterKey,
+                character_display_name = request.CharacterDisplayName,
+                faction_key = request.FactionKey,
+                scene = request.Scene,
+                player_text = request.PlayerText,
+                off_topic_streak = request.OffTopicStreak,
+                recent_history = request.RecentHistory,
+                game_context = new
+                {
+                    authority = context.Authority,
+                    character = context.Character,
+                    original_character_profile = context.OriginalCharacterProfile,
+                    trade = includeTrade ? context.Trade : null,
+                    original_story_facts = context.OriginalStoryFacts,
+                    original_dialogue_context = context.OriginalDialogueContext,
+                    relationship = context.Relationship,
+                    procurement = includeProcurement ? context.Procurement : null,
+                    active_world_events = includeWorld ? context.ActiveWorldEvents : null,
+                    third_party_tasks = includeThirdParty ? context.ThirdPartyTasks : null,
+                    known_characters = includeThirdParty ? context.KnownCharacters : null
+                }
+            }, OmitNullJsonOptions);
+        }
+
+        return JsonSerializer.Serialize(new
+        {
+            conversation_id = request.ConversationId,
+            turn_id = request.TurnId,
+            character_key = request.CharacterKey,
+            character_display_name = request.CharacterDisplayName,
+            faction_key = request.FactionKey,
+            scene = request.Scene,
+            player_text = request.PlayerText,
+            off_topic_streak = request.OffTopicStreak,
+            recent_history = request.RecentHistory,
+            game_context = new
+            {
+                authority = context.Authority,
+                character = context.Character,
+                original_character_profile = context.OriginalCharacterProfile,
+                trade = new
+                {
+                    available = trade.Available,
+                    phase = trade.Phase,
+                    direction = trade.Direction,
+                    item = trade.Item,
+                    final_offer_value = trade.FinalOfferValue,
+                    client_wants_item = trade.ClientWantsItem,
+                    client_refuses_item = trade.ClientRefusesItem,
+                    client_can_inspect_item = trade.ClientCanInspectItem
+                },
+                original_story_facts = context.OriginalStoryFacts,
+                original_dialogue_context = context.OriginalDialogueContext,
+                relationship = context.Relationship,
+                active_world_events = context.ActiveWorldEvents
+            }
+        });
     }
 
     private static object BuildProbeBody(ModelProfile profile, string protocol)
@@ -375,12 +535,12 @@ public sealed class OpenAiCompatibleProvider : IModelProvider
             };
     }
 
-    private static object[] BuildConversationMessages(ConversationRequest request, string systemPrompt = ConversationSystemPrompt)
+    private static object[] BuildConversationMessages(string requestJson, string systemPrompt)
     {
         return new object[]
         {
             new { role = "system", content = systemPrompt },
-            new { role = "user", content = JsonSerializer.Serialize(request) }
+            new { role = "user", content = requestJson }
         };
     }
 
@@ -451,9 +611,11 @@ public sealed class OpenAiCompatibleProvider : IModelProvider
         if (!profile.Protocol.Equals(AutoProtocol, StringComparison.OrdinalIgnoreCase))
             return false;
 
-        return attempt.StatusCode is not 401 and not 403 &&
-            !attempt.Error.Equals("连接检测已取消", StringComparison.Ordinal) &&
-            !attempt.Error.Equals("模型请求已取消", StringComparison.Ordinal);
+        // Protocol fallback only helps when the endpoint or payload shape is
+        // unsupported. Retrying a 5xx, timeout, rate limit, or invalid model
+        // response through the other endpoint doubles the player's wait and
+        // still reaches the same unhealthy upstream.
+        return attempt.StatusCode is 400 or 404 or 405 or 415 or 422;
     }
 
     private static bool PrefersResponses(string model)
@@ -464,6 +626,91 @@ public sealed class OpenAiCompatibleProvider : IModelProvider
             normalized.StartsWith("o3", StringComparison.Ordinal) ||
             normalized.StartsWith("o4", StringComparison.Ordinal) ||
             normalized.Contains("codex", StringComparison.Ordinal);
+    }
+
+    private static bool RequiresDetailedInstructions(ConversationRequest request)
+    {
+        if (request.GameContext.ThirdPartyTasks.Count > 0)
+            return true;
+
+        var text = request.PlayerText;
+        if (MentionsKnownCharacter(request.GameContext.KnownCharacters, text))
+            return true;
+
+        return ContainsAny(text,
+            "价格", "价钱", "多少钱", "便宜", "贵", "折", "优惠", "加价", "报价",
+            "信用点", "预算", "补付", "付款", "支付", "给我", "买", "卖", "交易",
+            "交换", "换", "物品", "东西", "货", "带来", "带点", "找货", "寻找",
+            "回访", "再来", "回来", "联系", "通知", "转告", "任务", "警察", "巡逻",
+            "小偷", "偷", "盗", "失窃", "警报", "防盗", "保险", "新闻", "供应",
+            "供给", "需求", "市场", "缺货", "涨价", "降价", "事件", "影响", "改变",
+            "安全", "保护", "环境", "情况", "生意", "客流", "库存", "长期", "永久",
+            "附近", "店门", "城市", "街区",
+            "离开", "走吧", "再见", "挂电话", "price", "discount", "trade", "barter",
+            "buy", "sell", "pay", "bring", "find", "contact", "leave", "hang up");
+    }
+
+    private static bool ContainsAny(string value, params string[] terms) =>
+        terms.Any(term => value.Contains(term, StringComparison.OrdinalIgnoreCase));
+
+    private static bool MentionsKnownCharacter(
+        IEnumerable<KnownCharacterContext> characters,
+        string text) =>
+        characters.Any(character =>
+            (!string.IsNullOrWhiteSpace(character.DisplayName) &&
+             text.Contains(character.DisplayName, StringComparison.OrdinalIgnoreCase)) ||
+            (!string.IsNullOrWhiteSpace(character.Key) &&
+             text.Contains(character.Key, StringComparison.OrdinalIgnoreCase)));
+
+    private static string BuildDetailedConversationSystemPrompt(ConversationRequest request)
+    {
+        var text = request.PlayerText;
+        var builder = new StringBuilder(DetailedConversationCorePrompt);
+
+        if (ContainsAny(text,
+                "价格", "价钱", "多少钱", "便宜", "贵", "折", "优惠", "加价", "报价",
+                "price", "discount"))
+            builder.Append(TradeInstructionBlock);
+
+        if (ContainsAny(text,
+                "找货", "寻找", "帮我找", "下次带", "以后带", "收购", "进货",
+                "find", "source", "procure"))
+            builder.Append(ProcurementInstructionBlock);
+
+        if (ContainsAny(text,
+                "回访", "再来", "回来", "明天来", "下次来", "visit", "come back"))
+            builder.Append(ReturnVisitInstructionBlock);
+
+        if (ContainsAny(text,
+                "其他东西", "还有什么", "带了什么", "拿出来", "身上的货", "随身",
+                "other items", "carrying"))
+            builder.Append(CarriedInventoryInstructionBlock);
+
+        if (ContainsAny(text,
+                "交换", "换", "以物换物", "barter", "swap", "exchange"))
+            builder.Append(BarterInstructionBlock);
+
+        if (ContainsAny(text,
+                "信用点", "预算", "补付", "付款", "支付", "转给", "给我", "credit", "pay"))
+            builder.Append(WalletInstructionBlock);
+
+        if (request.GameContext.ThirdPartyTasks.Count > 0 || ContainsAny(text,
+                "联系", "通知", "转告", "传话", "找个人", "contact", "tell", "message"))
+            builder.Append(ThirdPartyInstructionBlock);
+
+        if (ContainsAny(text,
+                "警察", "巡逻", "小偷", "偷窃", "盗窃", "失窃", "警报", "防盗",
+                "保险", "新闻", "供应", "供给", "需求", "市场", "缺货", "涨价",
+                "降价", "事件", "治安", "物价", "安全", "保护", "环境", "情况",
+                "生意", "客流", "库存", "长期", "永久", "附近", "店门", "城市", "街区"))
+            builder.Append(WorldPromiseInstructionBlock);
+
+        if (ContainsAny(text,
+                "离开", "走吧", "再见", "挂电话", "结束通话", "leave", "goodbye", "hang up"))
+            builder.Append(ExitInstructionBlock);
+
+        builder.Append(SparseOutputInstructionBlock);
+        return builder.ToString();
     }
 
     private static string BuildEndpoint(string baseUrl, string protocol)
@@ -688,6 +935,7 @@ public sealed class OpenAiCompatibleProvider : IModelProvider
                 Topic = ReadString(root, "topic") ?? "trade",
                 TaskRelevance = ReadTaskRelevance(root),
                 Mood = ReadString(root, "mood") ?? "calm",
+                RequiresGmReview = ReadBool(root, "gm_review"),
                 Signals = ReadSignals(root),
                 MemoryCandidates = ReadMemoryCandidates(root),
                 TradeProposal = ReadTradeProposal(root),
@@ -1070,19 +1318,40 @@ public sealed class OpenAiCompatibleProvider : IModelProvider
 
     private const string GmSystemPrompt = @"你是 GM 监督 AI，不扮演人物。只分析当前玩家输入、原版上下文、人物候选回复、人物候选结构化提案和 gm_knowledge，先识别目标，再按目标路径优先级选择当前状态满足条件的已有接口；直接路径不可用时选择备用路径。只能返回 JSON；npc_reply 固定填写 GM，world_modifications 只填写已确认可执行且可验证的计划，并填写 goal、path。若人物候选转账提案 explicit=true，你必须复核人物候选回复是否明确答应从当前顾客 client_budget 补付该具体金额：合理且可验证时输出同金额的 wallet_transfer 且 accepted=true，不合理或接口前置条件不满足时输出 wallet_transfer explicit=true、accepted=false；若没有候选转账提案且对话没有明确承诺，不得自行创造转账。source 固定为 client_budget。若人物候选第三方联系 explicit=true，只能在当前人物明确答应、目标人物能从已有人物目录唯一解析且能力目录含 visit.request.third_party 时保留完全相同的目标、目的、期限；条件不满足时返回同一 third_party_task 且 accepted=false，不得换成另一个人物。人物候选没有第三方提案时不得自行创建。目标人物本人处理状态为 arrived 的任务时，decision 才能填写 accept 或 reject。找不到合理落点时保持 world_modifications 为空。不得创造接口、字段、物品或机制。\n物品归属复核：trade.item.owner、client_carried_items 中的 owner 和 player_offered_items 中的 owner 是原版归属结论。owner=client 或界面“未拥有”表示顾客带来的物品，即使物品在玩家侧柜台、正在议价或 GetCountersItems() 返回了它，也不能当成玩家物品；只有 owner=player 的真实玩家侧物品才可作为玩家交换物。owner=unknown 时拒绝猜测并让相关提案保持未接受。identifier、internal_name、display_name、tags、condition_identifier 仅用于区分物品，不能推翻 owner。\n";
 
-    private const string ConversationSystemPrompt = @"你负责扮演人物并提取玩家的明确意图；世界数值和已有接口的最终裁决由另一个 GM 监督步骤完成。人物不得声称未经原版流程确认的价格、交换、预算或世界变化已经生效，也不要向玩家暴露内部审核过程；world_modifications 通常留空，未知字段、虚构接口和无法验证的因果链不要填写。
-你正在扮演《深空当铺》当前场景中的原版人物，而不是另一个平行角色。
-original_character_profile 是不可覆盖的原版角色档案：canonical_identity 决定你是谁；role_and_background 决定身份、职业和稳定背景；current_story_state 决定剧情进度；immutable_constraints 是硬约束；knowledge_boundaries 决定人物能知道什么；speech_style_samples 是措辞、节奏和态度的模仿样本。回复前必须先统一这些信息。不得改名、自称另一名原版人物、换阵营或职业，也不得把别人的经历、电话身份和台词归到自己身上。资料不足时保持含糊，不要补造身世。
-game_context 中的原版身份、剧情经历、来访记录、台词、交易物品、预算、鉴定能力和派系状态是权威事实；relationship 中的个人关系、派系关系和摘要记忆是对这些事实的补充。把两者自然融合成同一个人的经历与态度，不要解释数据结构，也不要编造未提供的交易、物品、秘密、人物或事件。个人好感可以改变同一人物的态度与选择，但不能改写其原版身份、既定背景或已发生剧情。
- trade.client_carried_items 是顾客本次真正携带、且当前可见的全部货物快照；它既包含顾客库存，也包含顾客侧柜台区域上暂时摆出的物品。顾客物品即使已经离开库存、摆到了柜台，owner 仍然是 client；界面上的“未拥有”标签是同一事实的强证据，不代表物品无主。对人物来说，owner=client 的物品就是“我带来的/我手里的东西”，不得说成玩家所有，也不得因为原版标签写着“未拥有”而否认自己携带它。trade.player_offered_items 只包含玩家侧柜台区域中、且已由原版拥有权确认属于玩家的物品。GetCountersItems() 会合并柜台两侧，不能据此推断玩家拥有。trade.item 是柜台正在谈的单件物品，owner 是当前归属的唯一依据；owner=unknown 时不得把它当作 player。identifier 是原版物品标识，internal_name 是原版内部名称，tags 是原版 itemTypes，condition_identifier 只在原版特征提供当前条件标识时出现；这些字段只帮助区分物品，不改变 owner。不得用显示名、交易方向、预算、物品所在的合并柜台或顾客一句“没带东西”来推断归属。origin=mod_procurement 表示按玩家此前委托找来的货，origin=mod_carried_inventory 表示买家额外随身携带且尚未主动出售的货。顾客可以谈论自己携带的货，但不得声称拥有清单中不存在的具体物品。
-只使用 character_known_correct_base_value 和 character_known_description 中明确提供的真实鉴定信息。若只提供 public_description，就只能按表面信息判断。电话场景不得谈成或修改店内来客的交易。
-回复应符合人物原版身份、当前来访目的和说话方式，通常一至三句。连续数轮偏离来访任务时可用 return_to_task 收束；若话题合适可以继续。
-若玩家明确提出价格变化，trade_proposal 只描述玩家的提议，不代表人物已经接受。kind 只能是 none、offer_discount、ask_markup、offer_buying_markup、ask_buying_discount；“打五折”表示 offer_discount 50%，而不是 5%。原版规则会另行决定接受、拒绝、离开和最终金额，因此 npc_reply 不得抢先宣称议价已经成功。
-memory_candidates 只记录玩家在本轮明确做过、承诺过或反复表达且值得以后记住的简短事实，不得把人物自己的临时情绪写成玩家行为。
-procurement 用于“玩家请当前顾客未来寻找并带来某类货物”的委托。只有玩家原话明确包含未来时间、寻找或携带动作以及玩家收购意图，且 procurement.can_request_future_goods=true 时，procurement_proposal.explicit 才能为 true。procurement.category_access 是人物原版身份、阵营、职业和真实随身货物推导出的硬性渠道边界；对应类别 allowed=false 时人物必须自然拒绝，绝不能因为玩家出价高或关系好而答应。allowed=true 只代表可以尝试，max_rarity 仍会限制其能接触的具体货物，原版掉落权重还会影响最终物品与成功率。模糊请求只有在能可靠归到唯一类别时才可接受，并用 category_confidence 给出 0 到 1 的把握；低于 0.7、同时涉及多个类别或“带点好东西”这类没有明确类型的请求，必须令 clarification_needed=true、accepted=false，并在 npc_reply 中追问。不得擅自承诺某件稀有物品；明确指定的货也只能说会尝试寻找，不得保证成功。人物只有在 npc_reply 中明确答应寻找时 accepted 才能为 true；拒绝、含糊回应或只是谈眼前货物时必须为 false。category 只能是 none、food、medical、material、household、weapon、tool、module、access_card、junk。不要因此更改人物当前原版来意；程序会把找到的货作为下次来访的附加交易。promised_premium_percent 只记录玩家明确承诺的加价，未给具体比例但明确说“高价收”时可填 15，最高 50。没有有效委托时必须返回 {""explicit"":false,""accepted"":false,""category"":""none"",""category_confidence"":0,""clarification_needed"":false,""requested_description"":"""",""due_in_days"":1,""promised_premium_percent"":0,""reason"":""""}。
- return_visit_proposal 只用于不包含找货内容的普通未来回访邀请。玩家必须明确说未来某天再来，人物也必须在 npc_reply 中明确答应；程序只把它加入原版未来队列，不保证挤掉故事来客或展柜吸引的顾客。carried_inventory_proposal 用于玩家要求买家展示或出售本次真正携带的其他货物，只有人物同意且清单里确有物品时 accepted 才能为 true。barter_proposal 用于明确的以物换物；client_item_runtime_key 必须来自 owner=client 的 client_carried_items；required_player_item_runtime_key 或 required_player_item_runtime_keys（优先使用）必须来自 owner=player 的 trade.player_offered_items，用于在 identifier 或显示名重复时锁定同一件物品；required_player_item_key 必须来自 owner=player 的真实柜台物品，不得把合并柜台列表中的顾客物品当成玩家物品，也不得虚构。wallet_transfer 只用于人物明确承诺从自己的 client_budget 支付给玩家；amount 必须是对话中明确的整数，且 accepted 只有在 npc_reply 明确答应后才为 true。不得把普通价格、找零或玩家自己的钱误报成转账。电话场景这四类提案全部必须为 false。
-必须只返回一个 JSON 对象。字段严格为：npc_reply（字符串）、conversation_mode（continue 或 return_to_task）、topic（字符串）、task_relevance（0 到 1）、mood（字符串）、signals（对象，含 warmth、respect、trust、offense、threat、cooperation、credibility、trade_willingness 八个整数）、memory_candidates（数组，元素含 kind、summary、importance）、trade_proposal（对象，含 kind、percent、target_amount、explicit、reason）、wallet_transfer（对象，含 explicit、accepted、amount、source、reason）、procurement_proposal（对象，含 explicit、accepted、category、category_confidence、clarification_needed、requested_description、due_in_days、promised_premium_percent、reason）、return_visit_proposal（对象，含 explicit、accepted、due_in_days、reason）、carried_inventory_proposal（对象，含 explicit、accepted、reason）、barter_proposal（对象，含 explicit、accepted、client_item_runtime_key、client_item_name、required_player_item_runtime_key、required_player_item_runtime_keys、required_player_item_key、required_player_item_name、required_player_item_keys、required_player_item_names、reason）、third_party_task（对象，含 explicit、accepted、target_character_key、target_display_name、purpose、due_in_days、reason、decision）。
-所有 signals 值必须为 -2 到 2 的整数；importance 为 0 到 1；没有明确议价时 trade_proposal 必须为 {""kind"":""none"",""percent"":0,""target_amount"":null,""explicit"":false,""reason"":""""}。没有对应行为时，新增 proposal 的 explicit 和 accepted 都必须为 false。";
+    private const string CompactConversationSystemPrompt = @"快速人物回复：扮演《深空当铺》当前原版人物。以 game_context 的人物身份、原版档案、剧情事实、当前物品、关系记忆和近期对话为准；不得改名、换身份、虚构经历、秘密、物品或已生效的世界变化。自然回应玩家，通常一至三句，保持人物语气。若对话明显结束或已连续偏题，可令 conversation_mode 为 return_to_task，否则为 continue。只返回 JSON，不要 Markdown。始终返回 npc_reply；可按需返回 conversation_mode、topic、mood、signals、memory_candidates。只有当人物在 npc_reply 中明确答应造成对话之外的持续状态变化、而且没有对应标准行为提案时，返回 gm_review=true；询问、闲聊和拒绝时省略。signals 仅写有把握的变化，值为 -2 到 2；memory_candidates 只记录玩家本轮值得长期记住的行为。普通闲聊不要返回交易、转账、找货、回访、交换、第三方任务或世界修改字段；未发生的行为字段必须省略。";
+
+    private const string DetailedConversationCorePrompt = @"你扮演《深空当铺》当前原版人物，同时提取本轮明确行为。人物身份、原版档案、剧情事实、当前交易、物品归属和关系记忆都是权威事实；不得改名、换职业、虚构经历、秘密、物品或接口。人物只知道上下文明确提供的内容。回复通常一至三句，符合当前身份与语气。人物不得声称未经原版流程或监督步骤确认的交易、付款及世界变化已经生效，也不得向玩家暴露内部处理过程。
+物品归属以 owner 为准：client 是顾客带来的，player 才是玩家拥有的，unknown 时不得猜。显示名、柜台位置、“未拥有”标签、交易方向和合并柜台清单都不能推翻 owner。电话场景不得谈成店内交易。
+";
+
+    private const string TradeInstructionBlock = @"价格提议规则：trade_proposal 只提取玩家明确提出的价格变化，不代表人物接受。kind 只能为 offer_discount、ask_markup、offer_buying_markup、ask_buying_discount；percent 和 target_amount 只填原话可确定的值。原版流程决定接受、拒绝、离开与最终金额。
+";
+
+    private const string ProcurementInstructionBlock = @"未来找货规则：只有玩家明确请当前人物未来寻找或带来某类货物，且 procurement.can_request_future_goods=true 时才返回 procurement_proposal。必须遵守 category_access；无法唯一归类则 clarification_needed=true、accepted=false 并追问。允许也只可答应尝试，不能保证找到。category 限定为 none、food、medical、material、household、weapon、tool、module、access_card、junk。
+";
+
+    private const string ReturnVisitInstructionBlock = @"回访规则：不含找货内容的未来回访邀请才使用 return_visit_proposal；玩家明确邀请且人物在回复中明确答应时 accepted=true。它只登记未来来访，不保证具体到店时间。
+";
+
+    private const string CarriedInventoryInstructionBlock = @"随身物品规则：玩家要求查看顾客本次携带的其他货物时才使用 carried_inventory_proposal；只有人物同意且 client_carried_items 中确有 owner=client 的物品时 accepted=true。
+";
+
+    private const string BarterInstructionBlock = @"混合交换规则：明确以物换物才返回 barter_proposal。client_item_runtime_key 必须来自 owner=client；required_player_item_runtime_key 或 runtime_keys 必须来自 owner=player，并优先用运行时编号唯一定位。不得用顾客物品充当玩家物品，不得虚构。若同一提议还包含补付，另按补付规则返回 wallet_transfer，两个提案都只描述约定条件，等待原版确认后一起结算。
+";
+
+    private const string WalletInstructionBlock = @"补付规则：wallet_transfer 只用于人物明确承诺从当前顾客 client_budget 另付给玩家的整数金额；npc_reply 明确答应后 accepted 才能为 true，source 固定为 client_budget。普通价格、找零、玩家付款不能误报成补付。
+";
+
+    private const string ThirdPartyInstructionBlock = @"第三方联系规则：玩家明确请当前人物联系另一名 known_characters 中的人物，且当前人物在回复中明确答应时才返回 third_party_task。目标必须唯一对应目录中的稳定 key 和显示名；无法唯一确认时追问或拒绝，accepted=false，不得创造人物。
+";
+
+    private const string WorldPromiseInstructionBlock = @"世界承诺规则：人物可以按身份自然答应或拒绝，但不能假装结果已生效。若人物无权作出承诺，应直接拒绝；若确实明确答应，返回 gm_review=true，监督步骤会另行寻找可验证的已有数值落点。人物请求不返回 world_modifications。
+";
+
+    private const string ExitInstructionBlock = @"离场规则：若人物在回复中明确要离店或结束电话，使用 conversation_mode=return_to_task；否则为 continue。不要让明确告别后还必须由玩家手动结束。
+";
+
+    private const string SparseOutputInstructionBlock = @"只返回 JSON，不要 Markdown。始终返回 npc_reply；可按需返回 conversation_mode、topic、task_relevance、mood、signals、memory_candidates、gm_review。只有本轮确实出现对应意图时才返回 trade_proposal、wallet_transfer、procurement_proposal、return_visit_proposal、carried_inventory_proposal、barter_proposal、third_party_task；未发生的行为字段必须省略，解析器会补默认值。只有人物明确答应造成对话之外的持续状态变化、且没有标准行为提案承载时 gm_review=true；询问或拒绝时省略。signals 值为 -2 到 2；memory_candidates 只记录玩家值得长期记住的明确行为；world_modifications 省略。";
 
     private const string ThirdPartyTaskRules = "third_party_task 只用于玩家明确请当前人物联系另一个已知人物，且人物在 npc_reply 中明确答应；目标人物必须来自 known_characters、原版上下文或 GM 可见的人物目录，不得创造身份。提案必须使用目录中的稳定 key 和原显示名；无法唯一对应时自然拒绝或追问，accepted=false。third_party_tasks 中状态为 arrived 且当前人物就是目标时，人物可以独立选择 decision=accept 或 reject；传话人此前答应不等于目标同意。";
 

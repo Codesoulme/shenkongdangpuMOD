@@ -38,6 +38,8 @@ public sealed class ConversationResponse
     public double TaskRelevance { get; set; }
     [JsonPropertyName("mood")]
     public string Mood { get; set; } = "calm";
+    [JsonPropertyName("gm_review")]
+    public bool RequiresGmReview { get; set; }
     [JsonPropertyName("signals")]
     public ConversationSignals Signals { get; set; } = new();
     [JsonPropertyName("memory_candidates")]
