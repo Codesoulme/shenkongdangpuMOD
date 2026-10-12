@@ -91,8 +91,20 @@ public sealed class ChatUiController
         _pendingRequest = null;
         _requestStartedTimestamp = 0;
         _replyPresenter = null;
-        _window?.Close();
+        var window = _window;
         _window = null;
+        window?.Close();
+    }
+
+    public void CloseIfScene(string scene)
+    {
+        if (!_scene.Equals(scene, StringComparison.OrdinalIgnoreCase))
+            return;
+        try { Close(); }
+        catch (Exception ex)
+        {
+            MelonLogger.Warning($"[当铺世界] 关闭已结束对话的输入框失败：{ex.Message}");
+        }
     }
 
     private void Send(WorldRuntime runtime)
@@ -167,6 +179,21 @@ public sealed class ChatUiController
             $"stage=ui_task_observed total_ms={ElapsedMilliseconds(_requestStartedTimestamp)}");
         try
         {
+            var completedRequest = _pendingRequest;
+            var currentSpeaker = GetCurrentSpeaker(_scene);
+            var speakerStillPresent = IsOpen && currentSpeaker is not null &&
+                                      completedRequest is not null &&
+                                      currentSpeaker.Value.Key.Equals(
+                                          completedRequest.CharacterKey,
+                                          StringComparison.OrdinalIgnoreCase);
+            if (!speakerStillPresent)
+            {
+                _ = task.Exception;
+                MelonLogger.Warning("[当铺世界] 回复到达时对话对象已经改变，已丢弃迟到回复");
+                Close();
+                return;
+            }
+
             var alreadyRecorded = false;
             var response = task.IsCanceled || task.IsFaulted
                 ? (_pendingRequest is null
@@ -178,7 +205,6 @@ public sealed class ChatUiController
                     : runtime.Reply(_pendingRequest))
                 : task.Result;
             alreadyRecorded = (task.IsCanceled || task.IsFaulted) && _pendingRequest is not null;
-            var completedRequest = _pendingRequest;
             if (completedRequest is not null)
             {
                 if (!alreadyRecorded)
@@ -187,12 +213,6 @@ public sealed class ChatUiController
             _pendingRequest = null;
 
             _offTopicStreak = response.Topic == "off_topic" ? _offTopicStreak + 1 : 0;
-            var currentSpeaker = GetCurrentSpeaker(_scene);
-            var speakerStillPresent = currentSpeaker is not null &&
-                                      completedRequest is not null &&
-                                      currentSpeaker.Value.Key.Equals(
-                                          completedRequest.CharacterKey,
-                                          StringComparison.OrdinalIgnoreCase);
             var tradeResult = speakerStillPresent && completedRequest is not null
                 ? ApplyLiveActions(runtime, completedRequest, response)
                 : new NativeTradeApplication();
@@ -202,11 +222,7 @@ public sealed class ChatUiController
                 : response.NpcReply;
             _history.Add($"{_characterName}：{historyReply}");
 
-            if (!speakerStillPresent)
-            {
-                MelonLogger.Warning("[当铺世界] 回复到达时对话对象已经改变，已阻止串话");
-            }
-            else if (replyHandledByOriginalBargain)
+            if (replyHandledByOriginalBargain)
             {
                 MelonLogger.Msg(
                     $"[当铺世界] 原版议价对话已接管回复：{tradeResult.Message}");

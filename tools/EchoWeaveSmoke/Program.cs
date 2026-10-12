@@ -25,6 +25,7 @@ try
     DailyEventFlow();
     NamedCharacterPersistenceFlow();
     LocalFallbackConversationFlow();
+    ActionRefusalMustWinFlow();
     ModelProtocolCacheFlow();
     ModelTransientFailureDoesNotDoubleWaitFlow();
     ModelUsesSparseConversationContractFlow();
@@ -470,6 +471,80 @@ void LocalFallbackConversationFlow()
     var phoneReply = engine.Reply(request);
     Assert(!phoneReply.ReturnVisitProposal.Explicit && !phoneReply.BarterProposal.Explicit,
         "电话场景错误地产生店内动作提案。");
+}
+
+void ActionRefusalMustWinFlow()
+{
+    var request = new ConversationRequest
+    {
+        Scene = "store",
+        CharacterKey = "client-one",
+        PlayerText = "明天再来，身上的东西拿出来看看，再用报纸换水并补我5信用点",
+        GameContext = new GameConversationContext
+        {
+            Character = new NativeCharacterContext
+            {
+                Key = "client-one",
+                OriginalIdentifier = "client-one"
+            }
+        }
+    };
+    var rejected = new ConversationResponse
+    {
+        NpcReply = "不行，我不换，也不会给你信用点。",
+        TradeProposal = new TradeProposal { Explicit = true },
+        ProcurementProposal = new ProcurementProposal { Explicit = true, Accepted = true },
+        ReturnVisitProposal = new ReturnVisitProposal { Explicit = true, Accepted = true },
+        CarriedInventoryProposal = new CarriedInventoryProposal { Explicit = true, Accepted = true },
+        BarterProposal = new BarterProposal { Explicit = true, Accepted = true },
+        ThirdPartyTask = new ThirdPartyTaskProposal
+        {
+            Explicit = true,
+            Accepted = true,
+            Decision = "accept"
+        },
+        WorldModifications = new List<WorldModificationProposal> { new() },
+        WalletTransfer = new WalletTransferProposal
+        {
+            Explicit = true,
+            Accepted = true,
+            Amount = 5,
+            Source = "client_budget"
+        }
+    };
+    var resolver = typeof(WorldRuntime).Assembly.GetType(
+        "AIWorldPawnshop.Runtime.ConversationActionResolver", throwOnError: true)!;
+    var acceptsReply = resolver.GetMethod("IsAcceptedReply",
+        System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!;
+    var refusesReply = resolver.GetMethod("IsRefusalReply",
+        System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!;
+    Assert(!(bool)acceptsReply.Invoke(null, new object[] { rejected.NpcReply })! &&
+           !(bool)acceptsReply.Invoke(null, new object[] { "好像没法来，还是算了。" })! &&
+           !(bool)acceptsReply.Invoke(null, new object[] { "我答应不了。" })! &&
+           !(bool)acceptsReply.Invoke(null, new object[] { "可以考虑一下。" })!,
+        "拒绝语被误判为同意，可能触发错误交易。");
+    Assert((bool)acceptsReply.Invoke(null, new object[] { "好，明天我来。" })! &&
+           (bool)acceptsReply.Invoke(null, new object[] { "我不想走，但可以换。" })! &&
+           !(bool)refusesReply.Invoke(null, new object[] { "我不想走，但可以换。" })!,
+        "拒绝离开却同意交易的句子被整体误判为拒绝。");
+    var normalize = resolver.GetMethod("Normalize",
+        System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static)!;
+    normalize.Invoke(null, new object[] { request, rejected });
+    Assert(!rejected.TradeProposal.Explicit &&
+           !rejected.ProcurementProposal.Accepted &&
+           !rejected.ReturnVisitProposal.Accepted &&
+           !rejected.CarriedInventoryProposal.Accepted &&
+           !rejected.BarterProposal.Accepted &&
+           !rejected.WalletTransfer.Accepted &&
+           !rejected.ThirdPartyTask.Explicit &&
+           rejected.WorldModifications.Count == 0,
+        "人物已明确拒绝，结构化接受字段仍会触发动作。");
+
+    request.PlayerText = "明天再来一趟吧";
+    var ambiguous = new ConversationResponse { NpcReply = "好像没法来，还是算了。" };
+    normalize.Invoke(null, new object[] { request, ambiguous });
+    Assert(!ambiguous.ReturnVisitProposal.Accepted,
+        "包含“好”的拒绝语被误判为同意回访。");
 }
 
 void ModelProtocolCacheFlow()

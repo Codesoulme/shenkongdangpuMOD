@@ -76,8 +76,12 @@ public sealed class AIWorldPawnshopMod : MelonMod
         _runtime?.OnNativeItemBought(item, cost);
     internal void PrepareNativeItemBought(GameItem? item) =>
         _runtime?.PrepareNativeItemBought(item);
-    internal void OnNativeClientDismissed(StoreClient? client) =>
+    internal void OnNativeClientDismissed(StoreClient? client)
+    {
+        _chatUi?.CloseIfScene("store");
         _runtime?.OnNativeClientDismissed(client);
+    }
+    internal void OnNativePhoneEnded() => _chatUi?.CloseIfScene("phone");
     internal void OpenWorldPage()
     {
         if (_runtime is not null && _ui is not null)

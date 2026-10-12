@@ -56,7 +56,7 @@ internal static class NativeWalletAdapter
         var pending = _pending;
         if (pending is null ||
             !pending.ClientKey.Equals(clientKey, StringComparison.OrdinalIgnoreCase))
-            return true;
+            return false;
 
         // Consume the reservation before applying it. A failed native callback
         // must not leave a second click able to charge the customer twice.
@@ -85,6 +85,29 @@ internal static class NativeWalletAdapter
         catch (Exception ex)
         {
             MelonLogger.Error($"[当铺世界] 交换确认后补款失败：{ex.Message}");
+            return false;
+        }
+    }
+
+    public static bool CanCommitPending(string clientKey, int expectedAmount)
+    {
+        var pending = _pending;
+        if (pending is null || expectedAmount <= 0 || pending.Amount != expectedAmount ||
+            !pending.ClientKey.Equals(clientKey, StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        try
+        {
+            var playerStore = PlayerStore.Instance;
+            var instance = playerStore?.currentClientInstance;
+            var client = instance?.GetClientBlueprint() ?? instance?.storeClient;
+            var liveKey = FirstNotBlank(client?.identifier, client?.displayName);
+            return client is not null && client.useClientBudget &&
+                   liveKey.Equals(clientKey, StringComparison.OrdinalIgnoreCase) &&
+                   client.GetBudget() >= expectedAmount;
+        }
+        catch
+        {
             return false;
         }
     }

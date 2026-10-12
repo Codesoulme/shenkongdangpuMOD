@@ -43,6 +43,9 @@ CheckInitializationDoesNotPatchTwice(modAssembly, failures);
 CheckPhoneChoiceIsolationContract(modAssembly, failures);
 CheckDeferredBarterSettlementContract(modAssembly, failures);
 CheckBarterPresentationContract(modAssembly, failures);
+CheckLateReplySpeakerGuardContract(modAssembly, failures);
+CheckConversationLifecycleContract(modAssembly, failures);
+CheckMissingWalletReservationContract(modAssembly, failures);
 
 if (failures.Count > 0)
 {
@@ -233,6 +236,74 @@ static void CheckBarterPresentationContract(
         .GetType("AIWorldPawnshop.BarterOfferGetItemPlacedResponsePatch", throwOnError: true)!;
     if (responsePatch.GetMethod("Postfix", BindingFlags.NonPublic | BindingFlags.Static) is null)
         failures.Add("BarterOffer placed-item response patch is missing its Postfix.");
+}
+
+static void CheckLateReplySpeakerGuardContract(
+    Assembly modAssembly,
+    ICollection<string> failures)
+{
+    var controller = modAssembly
+        .GetType("AIWorldPawnshop.UI.ChatUiController", throwOnError: true)!;
+    var pollReply = controller.GetMethod("PollReply", BindingFlags.NonPublic | BindingFlags.Instance)!;
+    var calls = EnumerateCalledMethods(pollReply).Select(method => method.Name).ToList();
+    var speakerCheck = calls.IndexOf("GetCurrentSpeaker");
+    var fallbackReply = calls.IndexOf("Reply");
+    var recordConversation = calls.IndexOf("RecordConversation");
+    if (speakerCheck < 0 || fallbackReply < 0 || recordConversation < 0 ||
+        speakerCheck > fallbackReply || speakerCheck > recordConversation)
+    {
+        failures.Add(
+            "PollReply must verify the live speaker before fallback reply or conversation recording.");
+    }
+}
+
+static void CheckConversationLifecycleContract(
+    Assembly modAssembly,
+    ICollection<string> failures)
+{
+    var mod = modAssembly
+        .GetType("AIWorldPawnshop.AIWorldPawnshopMod", throwOnError: true)!;
+    var dismiss = mod.GetMethod("OnNativeClientDismissed", BindingFlags.NonPublic | BindingFlags.Instance)!;
+    if (!EnumerateCalledMethods(dismiss).Any(method => method.Name == "CloseIfScene"))
+        failures.Add("Customer departure does not close a pending store conversation.");
+
+    foreach (var patchName in new[]
+             {
+                 "AIWorldPawnshop.UI.NativePhoneStopCallPatch",
+                 "AIWorldPawnshop.UI.NativePhoneClosePatch"
+             })
+    {
+        var patch = modAssembly.GetType(patchName, throwOnError: true)!;
+        var postfix = patch.GetMethod("Postfix", BindingFlags.NonPublic | BindingFlags.Static)!;
+        if (!EnumerateCalledMethods(postfix).Any(method => method.Name == "OnNativePhoneEnded"))
+            failures.Add($"{patchName} does not close a pending phone conversation.");
+    }
+}
+
+static void CheckMissingWalletReservationContract(
+    Assembly modAssembly,
+    ICollection<string> failures)
+{
+    var wallet = modAssembly
+        .GetType("AIWorldPawnshop.Runtime.NativeWalletAdapter", throwOnError: true)!;
+    var commit = wallet.GetMethod("CommitPending", BindingFlags.Public | BindingFlags.Static)!;
+    if ((bool)commit.Invoke(null, new object[] { "no-pending-client" })!)
+        failures.Add("A missing wallet reservation is reported as a successful cash settlement.");
+
+    var canCommit = wallet.GetMethod("CanCommitPending", BindingFlags.Public | BindingFlags.Static);
+    if (canCommit is null)
+    {
+        failures.Add("Mixed barter has no pre-accept cash reservation check.");
+        return;
+    }
+    if ((bool)canCommit.Invoke(null, new object[] { "no-pending-client", 5 })!)
+        failures.Add("A missing or stale cash reservation can pass the pre-accept check.");
+
+    var barter = modAssembly
+        .GetType("AIWorldPawnshop.Runtime.NativeBarterAdapter", throwOnError: true)!;
+    var validate = barter.GetMethod("ValidateBeforeAccept", BindingFlags.Public | BindingFlags.Static)!;
+    if (!EnumerateCalledMethods(validate).Any(method => method.Name == "CanCommitPending"))
+        failures.Add("Barter acceptance does not recheck the promised cash leg.");
 }
 
 static IEnumerable<MethodBase> EnumerateCalledMethods(MethodInfo method)

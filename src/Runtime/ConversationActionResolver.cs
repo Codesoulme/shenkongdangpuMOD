@@ -9,6 +9,19 @@ internal static class ConversationActionResolver
 
     public static void Normalize(ConversationRequest request, ConversationResponse response)
     {
+        if (IsRefusalReply(response.NpcReply))
+        {
+            response.TradeProposal = new TradeProposal();
+            response.ProcurementProposal = new ProcurementProposal();
+            response.ReturnVisitProposal = new ReturnVisitProposal();
+            response.CarriedInventoryProposal = new CarriedInventoryProposal();
+            response.BarterProposal = new BarterProposal();
+            response.WalletTransfer = new WalletTransferProposal();
+            response.ThirdPartyTask = new ThirdPartyTaskProposal();
+            response.WorldModifications = new List<WorldModificationProposal>();
+            return;
+        }
+
         ResolveReturnVisit(request, response);
         ResolveCarriedInventory(request, response);
         ResolveBarter(request, response);
@@ -203,9 +216,31 @@ internal static class ConversationActionResolver
             proposal.Reason = proposal.Accepted ? "人物明确同意从预算补付信用点" : "人物没有明确同意补付信用点";
     }
 
-    private static bool IsAcceptedReply(string value) =>
-        ContainsAny(value, "好", "可以", "行", "答应", "没问题", "成交", "就这么办", "拿出来", "给你看") &&
-        !ContainsAny(value, "不行", "不能", "不可以", "拒绝", "别想", "没门", "不答应");
+    private static bool IsAcceptedReply(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value) || IsRefusalReply(value))
+            return false;
+
+        var reply = value.TrimStart();
+        var openingAgreement = new[]
+        {
+            "好的", "好吧", "好啊", "好，", "好。", "行吧", "行啊", "行，", "行。"
+        }.Any(prefix => reply.StartsWith(prefix, StringComparison.Ordinal));
+        return reply is "好" or "行" ||
+               openingAgreement ||
+               ContainsAny(reply, "可以", "答应", "没问题", "成交", "就这么办", "拿出来", "给你看");
+    }
+
+    private static bool IsRefusalReply(string value) =>
+        !string.IsNullOrWhiteSpace(value) &&
+        (value.TrimStart().StartsWith("不好", StringComparison.Ordinal) ||
+         ContainsAny(value,
+             "不行", "不能", "不可以", "不太行", "不卖", "不换", "不答应",
+             "不想来", "不愿来", "不想卖", "不愿卖", "不想换", "不愿换",
+             "不想给", "不愿给", "不想付", "不愿付", "不要换", "不要卖",
+             "行不通", "没法", "没办法", "办不到", "做不到", "无法",
+             "答应不了", "可以考虑", "考虑一下", "再考虑", "拒绝", "别想",
+             "没门", "算了", "免了", "恐怕"));
 
     private static bool ContainsDeparture(string value, params string[] terms)
     {

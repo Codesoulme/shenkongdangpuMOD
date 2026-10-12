@@ -47,13 +47,21 @@ internal static class NativePhoneInterruptPatch
 [HarmonyPatch(typeof(PhoneUIManager), nameof(PhoneUIManager.StopCall))]
 internal static class NativePhoneStopCallPatch
 {
-    private static void Postfix() => NativeDialogEntry.HidePhoneChoices();
+    private static void Postfix()
+    {
+        NativeDialogEntry.HidePhoneChoices();
+        AIWorldPawnshopMod.Instance?.OnNativePhoneEnded();
+    }
 }
 
 [HarmonyPatch(typeof(PhoneUIManager), nameof(PhoneUIManager.CloseUI))]
 internal static class NativePhoneClosePatch
 {
-    private static void Postfix() => NativeDialogEntry.HidePhoneChoices();
+    private static void Postfix()
+    {
+        NativeDialogEntry.HidePhoneChoices();
+        AIWorldPawnshopMod.Instance?.OnNativePhoneEnded();
+    }
 }
 
 [HarmonyPatch(typeof(PhoneUIManager), nameof(PhoneUIManager.OnPhoneDialogEnd))]

@@ -55,6 +55,7 @@ internal static class NativeBarterAdapter
         public List<string> PlayerItemIdentifiers { get; init; } = new();
         public List<string> PlayerItemNames { get; init; } = new();
         public List<BarterConditionPlan> PlayerItemConditionPlans { get; init; } = new();
+        public int PromisedCashAmount { get; init; }
         public BarterOffer? NativeOffer { get; set; }
         public bool FrontOwnershipHandled { get; set; }
         public bool BackOwnershipHandled { get; set; }
@@ -263,7 +264,11 @@ internal static class NativeBarterAdapter
                 PlayerItemNames = requiredItems
                     .Select(DisplayName)
                     .ToList(),
-                PlayerItemConditionPlans = conditionPlans
+                PlayerItemConditionPlans = conditionPlans,
+                PromisedCashAmount = response.WalletTransfer.Explicit &&
+                                     response.WalletTransfer.Accepted
+                    ? response.WalletTransfer.Amount
+                    : 0
             };
             _execution.NativeOffer = offer;
             client.SetBarterOffer(offer);
@@ -441,6 +446,12 @@ internal static class NativeBarterAdapter
             return;
         }
 
+        if (execution.PromisedCashAmount <= 0)
+        {
+            NativeWalletAdapter.CancelPending(execution.ClientKey);
+            return;
+        }
+
         if (!NativeWalletAdapter.CommitPending(execution.ClientKey))
             MelonLogger.Warning("[当铺世界] 交换物已成交，但确认后的补款未执行");
     }
@@ -467,6 +478,10 @@ internal static class NativeBarterAdapter
             var liveKey = FirstNotBlank(client?.identifier, client?.displayName);
             if (client is null || !liveKey.Equals(execution.ClientKey, StringComparison.OrdinalIgnoreCase))
                 return CancelExecution(execution, "确认时来客已改变");
+            if (execution.PromisedCashAmount > 0 &&
+                !NativeWalletAdapter.CanCommitPending(
+                    execution.ClientKey, execution.PromisedCashAmount))
+                return CancelExecution(execution, "确认时顾客补款已不可用");
 
             var entry = EmporiumEntry.Instance;
             if (entry is null)
