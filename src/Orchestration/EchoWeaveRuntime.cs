@@ -163,6 +163,46 @@ public sealed class EchoWeaveRuntime
         }, "adapter_outcome", summary);
     }
 
+    /// <summary>
+    /// Records deterministic cross-day work without pretending that it came
+    /// from a live conversation turn.  The stable world/day/subject tuple
+    /// makes retries idempotent and keeps events, expirations and arrivals in
+    /// the same append-only ledger as dialogue-triggered capabilities.
+    /// </summary>
+    public bool TryRecordWorldOutcome(
+        int day,
+        string capabilityKey,
+        string subjectKey,
+        string summary,
+        EchoWeaveIntentStatus status,
+        IReadOnlyDictionary<string, string>? outputs = null)
+    {
+        var arguments = outputs is null
+            ? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            : new Dictionary<string, string>(outputs, StringComparer.OrdinalIgnoreCase);
+        arguments["subject_key"] = subjectKey ?? string.Empty;
+        var key = EchoWeaveKeys.Create(
+            WorldId,
+            "world",
+            day,
+            capabilityKey,
+            arguments);
+        return _ledger.TryPropose(new IntentRecord
+        {
+            WorldId = WorldId,
+            SessionId = "world",
+            TurnId = day,
+            CapabilityKey = capabilityKey,
+            CapabilityVersion = Capabilities.Describe(capabilityKey)?.Descriptor.Version ?? "1.0",
+            SnapshotRevision = Snapshot.StateRevision.ToString(),
+            Status = status,
+            DeduplicationKey = key,
+            IntentSummary = summary,
+            Arguments = arguments,
+            CreatedDay = day
+        }, "world_outcome", summary);
+    }
+
     public EchoWeaveRecoveryReport Recover(WorldState state)
     {
         ArgumentNullException.ThrowIfNull(state);

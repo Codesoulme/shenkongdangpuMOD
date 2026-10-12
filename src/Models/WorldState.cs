@@ -44,8 +44,14 @@ public sealed class CharacterState
 {
     public string CharacterKey { get; set; } = string.Empty;
     public string DisplayName { get; set; } = string.Empty;
+    // Persist the native identifier separately from the Mod's canonical key.
+    // Future-client queues accept the former, while conversation state uses the latter.
+    public string OriginalIdentifier { get; set; } = string.Empty;
+    public string OriginalRealName { get; set; } = string.Empty;
     public string FactionKey { get; set; } = string.Empty;
     public bool IsNamedSpecialCharacter { get; set; }
+    public bool CanReturn { get; set; }
+    public bool CanReturnAsBuyer { get; set; }
     public int Relationship { get; set; }
     public int InteractionCount { get; set; }
     public int? LastInteractionDay { get; set; }
@@ -178,6 +184,7 @@ public sealed class ThirdPartyTaskState
     public string TaskKey { get; set; } = Guid.NewGuid().ToString("N");
     public string SourceCharacterKey { get; set; } = string.Empty;
     public string TargetCharacterKey { get; set; } = string.Empty;
+    public string TargetNativeIdentifier { get; set; } = string.Empty;
     public string TargetDisplayName { get; set; } = string.Empty;
     public string Purpose { get; set; } = string.Empty;
     public int CreatedDay { get; set; }
@@ -185,4 +192,7 @@ public sealed class ThirdPartyTaskState
     public string Status { get; set; } = "proposed";
     public string OutcomeSummary { get; set; } = string.Empty;
     public bool NativeQueueScheduled { get; set; }
+    public bool NativeQueueOwned { get; set; }
+    public int? NativeQueueDay { get; set; }
+    public int? ArrivedDay { get; set; }
 }

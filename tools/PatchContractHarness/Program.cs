@@ -37,6 +37,8 @@ var gameAssembly = AssemblyLoadContext.Default.LoadFromAssemblyPath(
     Path.Combine(gameDirectory, "MelonLoader", "Il2CppAssemblies", "Assembly-CSharp.dll"));
 
 CheckNewsProjectionResultContract(modAssembly, gameAssembly, failures);
+CheckNewsProjectionScopeCleanupContract(modAssembly, failures);
+CheckWorldEconomyProjectionContract(modAssembly, failures);
 CheckInitializationDoesNotPatchTwice(modAssembly, failures);
 CheckPhoneChoiceIsolationContract(modAssembly, failures);
 CheckDeferredBarterSettlementContract(modAssembly, failures);
@@ -73,6 +75,48 @@ static void CheckNewsProjectionResultContract(
             $"GetActiveEvents returns {expected}, but the news postfix declares " +
             $"{resultParameter.ParameterType}.");
     }
+}
+
+static void CheckNewsProjectionScopeCleanupContract(
+    Assembly modAssembly,
+    ICollection<string> failures)
+{
+    var patch = modAssembly
+        .GetType("AIWorldPawnshop.NewsUiManagerPopulatePatch", throwOnError: true)!;
+    var finalizer = patch.GetMethod("Finalizer", BindingFlags.NonPublic | BindingFlags.Static);
+    if (finalizer is null)
+    {
+        failures.Add("NewsUIManager.PopulateUI patch lacks an exception finalizer for scope cleanup.");
+        return;
+    }
+
+    var state = finalizer.GetParameters().SingleOrDefault(parameter => parameter.Name == "__state");
+    var exception = finalizer.GetParameters().SingleOrDefault(parameter => parameter.Name == "__exception");
+    if (state?.ParameterType != typeof(bool).MakeByRefType() ||
+        exception?.ParameterType != typeof(Exception) ||
+        finalizer.ReturnType != typeof(Exception))
+    {
+        failures.Add("News projection finalizer does not preserve Harmony exception/state contract.");
+    }
+}
+
+static void CheckWorldEconomyProjectionContract(
+    Assembly modAssembly,
+    ICollection<string> failures)
+{
+    var adapter = modAssembly
+        .GetType("AIWorldPawnshop.Runtime.NativeWorldEconomyAdapter", throwOnError: true)!;
+    foreach (var methodName in new[] { "ApplyCurrentClient", "RefreshCurrentClient", "RestoreClient" })
+    {
+        if (adapter.GetMethod(methodName, BindingFlags.Public | BindingFlags.Static) is null)
+            failures.Add($"Native world economy adapter lacks {methodName}.");
+    }
+
+    var dismissPatch = modAssembly
+        .GetType("AIWorldPawnshop.PlayerStoreDismissClientPatch", throwOnError: true)!;
+    var postfix = dismissPatch.GetMethod("Postfix", BindingFlags.NonPublic | BindingFlags.Static)!;
+    if (!EnumerateCalledMethods(postfix).Any(method => method.Name == "OnNativeClientDismissed"))
+        failures.Add("DismissCurrentClient does not route through native economy restoration.");
 }
 
 static void CheckInitializationDoesNotPatchTwice(

@@ -5,8 +5,10 @@ using AIWorldPawnshop.Orchestration;
 using AIWorldPawnshop.GM;
 using AIWorldPawnshop.Model;
 using AIWorldPawnshop.Runtime;
+using AIWorldPawnshop.Storage;
 using System.Net;
 using System.Text;
+using System.Text.Json;
 
 var root = Path.Combine(Path.GetTempPath(), "AIWorldPawnshop-EchoWeaveSmoke", Guid.NewGuid().ToString("N"));
 Directory.CreateDirectory(root);
@@ -24,6 +26,11 @@ try
     ModelProtocolCacheFlow();
     GmReviewRoutingFlow();
     ThirdPartyTaskCanonicalizationFlow();
+    ThirdPartyCapabilityMappingFlow();
+    WorldOutcomeLedgerFlow();
+    StaleResponseStripsThirdPartyActionFlow();
+    CrossDayNewsProjectionFlow();
+    LegacyWorldNormalizationFlow();
     Console.WriteLine("EchoWeave phase-one smoke passed.");
     return 0;
 }
@@ -42,6 +49,143 @@ void RegistryContainsOnlyKnownCapabilities()
         "Procurement risk should be R3.");
     Assert(!registry.TryGet("runtime.compile.patch", out _),
         "Unknown runtime capability must not exist.");
+}
+
+void ThirdPartyCapabilityMappingFlow()
+{
+    var registry = BuiltInCapabilityCatalog.Create();
+    var valueExecutors = new GmExecutorRegistry();
+    var unmapped = GmInterfaceCatalog.Executable()
+        .Where(x => !registry.TryGet(x.Executor, out _) &&
+                    !valueExecutors.TryGet(x.Executor, out _))
+        .Select(x => $"{x.Key}->{x.Executor}")
+        .ToList();
+    Assert(unmapped.Count == 0,
+        "可修改接口存在未绑定的执行器：" + string.Join("，", unmapped));
+    var descriptor = GmInterfaceCatalog.Describe("capability.third_party.contact");
+    Assert(descriptor is { Status: "implemented", CanModify: true },
+        "第三方联系接口没有标记为可执行实现。");
+    Assert(registry.TryGet(descriptor!.Executor, out var capability),
+        "第三方接口目录的执行键没有绑定到已注册能力。");
+    Assert(capability.Descriptor.CapabilityKey == "visit.request.third_party",
+        "第三方接口映射到了错误的能力。");
+}
+
+void WorldOutcomeLedgerFlow()
+{
+    var ledgerRoot = Path.Combine(root, "world-outcome-ledger");
+    var runtime = new EchoWeaveRuntime(ledgerRoot, "world-outcome");
+    Assert(runtime.TryRecordWorldOutcome(
+            5,
+            "world.propose.event",
+            "event-one",
+            "每日事件生成并发布",
+            EchoWeaveIntentStatus.Fulfilled),
+        "跨天世界结果没有写入统一账簿。");
+    Assert(!runtime.TryRecordWorldOutcome(
+            5,
+            "world.propose.event",
+            "event-one",
+            "每日事件生成并发布",
+            EchoWeaveIntentStatus.Fulfilled),
+        "相同世界结果被重复写入。 ");
+    var entry = runtime.Ledger.Entries.Single();
+    Assert(entry.Kind == "world_outcome" &&
+           entry.CapabilityKey == "world.propose.event" &&
+           entry.Data["subject_key"] == "event-one",
+        "跨天回执没有保留能力和主体标识。");
+}
+
+void StaleResponseStripsThirdPartyActionFlow()
+{
+    var response = new ConversationResponse
+    {
+        ThirdPartyTask = new ThirdPartyTaskProposal
+        {
+            Explicit = true,
+            Accepted = true,
+            TargetCharacterKey = "target"
+        }
+    };
+    WorldRuntime.StripUnsafeWorldActions(response);
+    Assert(!response.ThirdPartyTask.Explicit && !response.ThirdPartyTask.Accepted,
+        "过期回复仍保留第三方联系动作。");
+}
+
+void CrossDayNewsProjectionFlow()
+{
+    var state = new WorldState { CurrentDay = 4 };
+    state.ActiveEvents.Add(new WorldEventState
+    {
+        EventKey = "active-event",
+        StartDay = 3,
+        DurationDays = 2
+    });
+    state.ActiveModifications.Add(new WorldModificationState
+    {
+        TargetKey = "medical",
+        StartDay = 2,
+        DurationDays = 0
+    });
+    Assert(NativeNewsProjectionRules.ShouldProject(state, new NewsRecord
+        {
+            Day = 3,
+            SourceEventKey = "active-event"
+        }),
+        "仍在生效的跨天事件没有继续投影到原版报纸。");
+    Assert(NativeNewsProjectionRules.ShouldProject(state, new NewsRecord
+        {
+            Day = 2,
+            SourceEventKey = "gm:medical"
+        }),
+        "仍在生效的永久 GM 修正没有继续投影到原版报纸。");
+    Assert(!NativeNewsProjectionRules.ShouldProject(state, new NewsRecord
+        {
+            Day = 2,
+            SourceEventKey = "expired-event"
+        }),
+        "已结束的旧新闻仍被投影到当前报纸。");
+}
+
+void LegacyWorldNormalizationFlow()
+{
+    var dataRoot = Path.Combine(root, "legacy-world");
+    var worlds = Path.Combine(dataRoot, "Worlds");
+    Directory.CreateDirectory(worlds);
+    File.WriteAllText(
+        Path.Combine(worlds, "legacy.json"),
+        @"{
+          ""worldId"": ""legacy"",
+          ""activeModifications"": null,
+          ""thirdPartyTasks"": [{
+            ""taskKey"": null,
+            ""sourceCharacterKey"": null,
+            ""targetCharacterKey"": null,
+            ""targetNativeIdentifier"": null,
+            ""targetDisplayName"": null,
+            ""purpose"": null,
+            ""status"": null,
+            ""outcomeSummary"": null
+          }],
+          ""characters"": {
+            ""old-character"": {
+              ""characterKey"": ""old-character"",
+              ""displayName"": ""旧人物"",
+              ""originalIdentifier"": null,
+              ""originalRealName"": null
+            }
+          }
+        }");
+    var state = JsonSerializer.Deserialize<WorldState>(
+        File.ReadAllText(Path.Combine(worlds, "legacy.json")),
+        new JsonSerializerOptions { PropertyNameCaseInsensitive = true })!;
+    JsonFileStore.NormalizeLoadedWorld(state, "legacy");
+    Assert(state.ActiveModifications is not null &&
+           state.ThirdPartyTasks.Count == 1 &&
+           state.ThirdPartyTasks[0].TaskKey.Length > 0 &&
+           state.ThirdPartyTasks[0].Status == "proposed" &&
+           state.Characters["old-character"].OriginalIdentifier == string.Empty,
+        "旧存档没有安全迁移阶段四、五新增字段。");
 }
 
 void DeduplicationKeyIsStable()
@@ -281,7 +425,17 @@ void ModelProtocolCacheFlow()
         PlayerText = "今天天气怎么样？",
         GameContext = new GameConversationContext
         {
-            GmKnowledge = new List<string> { "GM_ONLY_KNOWLEDGE_MARKER" }
+            GmKnowledge = new List<string> { "GM_ONLY_KNOWLEDGE_MARKER" },
+            KnownCharacters = new List<KnownCharacterContext>
+            {
+                new()
+                {
+                    Key = "known-target",
+                    DisplayName = "KNOWN_CHARACTER_MARKER",
+                    NativeIdentifier = "native-known-target",
+                    CanReturn = true
+                }
+            }
         }
     };
 
@@ -289,7 +443,8 @@ void ModelProtocolCacheFlow()
     Assert(first is not null && handler.RequestPaths.Count == 2 &&
            handler.RequestPaths[0].EndsWith("/responses", StringComparison.Ordinal) &&
            handler.RequestPaths[1].EndsWith("/chat/completions", StringComparison.Ordinal) &&
-           handler.RequestBodies[0].Contains("GM_ONLY_KNOWLEDGE_MARKER", StringComparison.Ordinal) == false,
+           handler.RequestBodies[0].Contains("GM_ONLY_KNOWLEDGE_MARKER", StringComparison.Ordinal) == false &&
+           handler.RequestBodies[0].Contains("KNOWN_CHARACTER_MARKER", StringComparison.Ordinal),
         "自动协议首轮没有按预期从 Responses 回退到 Chat Completions。");
 
     request.TurnId = 2;
@@ -323,7 +478,9 @@ void ThirdPartyTaskCanonicalizationFlow()
     state.Characters["target-key"] = new CharacterState
     {
         CharacterKey = "target-key",
-        DisplayName = "目标人物"
+        DisplayName = "目标人物",
+        OriginalIdentifier = "native-target",
+        CanReturn = true
     };
     var proposal = new ThirdPartyTaskProposal
     {
@@ -341,8 +498,66 @@ void ThirdPartyTaskCanonicalizationFlow()
         out var targetName) &&
            targetKey == "target-key" && targetName == "目标人物",
         "第三方任务没有规范显示名到规范目标 key。");
+    Assert(WorldRuntime.TryResolveThirdPartyNativeIdentifier(
+        state,
+        proposal,
+        out _,
+        out _,
+        out var nativeIdentifier) &&
+           nativeIdentifier == "native-target",
+        "第三方任务没有保留原版人物标识，不能安全进入原版来客队列。");
     Assert(Math.Clamp(proposal.DueInDays, 1, 7) == 7,
         "第三方任务期限没有应用 1 至 7 天边界。");
+
+    state.Characters["duplicate-target"] = new CharacterState
+    {
+        CharacterKey = "duplicate-target",
+        DisplayName = "目标人物",
+        OriginalIdentifier = "native-duplicate",
+        CanReturn = true
+    };
+    Assert(!WorldRuntime.TryResolveThirdPartyTarget(
+            state,
+            new ThirdPartyTaskProposal { TargetDisplayName = "目标人物" },
+            out _,
+            out _),
+        "重名人物被任意选中，第三方联系必须要求唯一目标。");
+
+    var task = new ThirdPartyTaskState { Status = "accepted" };
+    Assert(!WorldRuntime.CanResolveThirdPartyDecision(task, "accept"),
+        "目标尚未到场时就提前完成了二次决定。");
+    task.Status = "arrived";
+    Assert(WorldRuntime.CanResolveThirdPartyDecision(task, "reject"),
+        "目标到场后的明确拒绝没有进入二次决定。");
+
+    var candidate = new ThirdPartyTaskProposal
+    {
+        Explicit = true,
+        Accepted = true,
+        TargetCharacterKey = "target-key",
+        TargetDisplayName = "目标人物",
+        Purpose = "转告一条消息",
+        DueInDays = 2
+    };
+    Assert(WorldRuntime.IsSameThirdPartyProposal(candidate, new ThirdPartyTaskProposal
+        {
+            Explicit = true,
+            Accepted = true,
+            TargetCharacterKey = "target-key",
+            TargetDisplayName = "目标人物",
+            Purpose = "转告一条消息",
+            DueInDays = 2
+        }),
+        "世界监督没有保留人物原始第三方提案。");
+    Assert(!WorldRuntime.IsSameThirdPartyProposal(candidate, new ThirdPartyTaskProposal
+        {
+            Explicit = true,
+            Accepted = true,
+            TargetCharacterKey = "duplicate-target",
+            Purpose = "转告一条消息",
+            DueInDays = 2
+        }),
+        "世界监督可以替换人物选定的第三方目标。");
 }
 
 void RuntimeRecoversUnfinishedConversation()

@@ -117,7 +117,11 @@ public sealed class WorldUiController
         var lines = state.Characters.Values
             .OrderByDescending(x => x.Relationship)
             .Take(20)
-            .Select(x => $"{x.DisplayName}  关系 {FormatRelationship(x.Relationship)}  互动 {x.InteractionCount} 次");
+            .Select(x =>
+                $"{x.DisplayName}  关系 {FormatRelationship(x.Relationship)}  互动 {x.InteractionCount} 次" +
+                (string.IsNullOrWhiteSpace(x.FactionKey) ? string.Empty : $"  阵营 {x.FactionKey}") +
+                (x.LastInteractionDay is int day ? $"  最近第 {day} 天" : string.Empty) +
+                (x.CanReturn || x.CanReturnAsBuyer ? "  可回访" : string.Empty));
         return "人物关系\n" + string.Join("\n", lines);
     }
 
@@ -157,7 +161,8 @@ public sealed class WorldUiController
         if (state.ActiveModifications.Count == 0)
             return "\nGM 系统变化\n暂无额外世界修正。";
         var lines = state.ActiveModifications.Select(x =>
-            $"{x.Title}（持续至第 {x.StartDay + x.DurationDays - 1} 天）\n{x.Summary}\n数据影响：{x.Field} {x.Value:+0.##;-0.##;0}");
+            $"{x.Title}（{(x.DurationDays == 0 ? "永久" : $"持续至第 {x.StartDay + x.DurationDays - 1} 天")}）\n" +
+            $"{x.Summary}\n数据影响：{x.Field} {x.Value:+0.##;-0.##;0}");
         return "\nGM 系统变化\n" + string.Join("\n\n", lines);
     }
 
@@ -165,16 +170,45 @@ public sealed class WorldUiController
     {
         if (state.ThirdPartyTasks.Count == 0) return "\n联系安排\n暂无第三方联系安排。";
         var lines = state.ThirdPartyTasks.OrderByDescending(x => x.CreatedDay).Take(10)
-            .Select(x => $"{x.TargetDisplayName}（第 {x.DueDay} 天）\n{x.Purpose}  [{x.Status}]");
+            .Select(x =>
+                $"{x.TargetDisplayName}（第 {x.DueDay} 天）\n" +
+                $"{x.Purpose}  [{x.Status}]" +
+                (x.NativeQueueScheduled ? "  [原版队列已登记]" : "  [等待原版路径]") +
+                (x.ArrivedDay is int arrivedDay ? $"  [第 {arrivedDay} 天到店]" : string.Empty));
         return "\n联系安排\n" + string.Join("\n\n", lines);
     }
 
     private static string BuildDiagnostics(WorldRuntime runtime)
     {
+        var all = GmInterfaceCatalog.All;
         var executable = GmInterfaceCatalog.Executable().Count();
-        var discovered = GmInterfaceCatalog.All.Count(x => x.Status.Equals("discovered", StringComparison.OrdinalIgnoreCase));
-        return $"\nGM 诊断（仅本地状态）\n可执行接口：{executable}  | 已发现待接入：{discovered}\n" +
-               $"世界修订：{runtime.State.StateRevision}  | 事件：{runtime.State.ActiveEvents.Count}  | 联系任务：{runtime.State.ThirdPartyTasks.Count}";
+        var gaps = all
+            .Where(x => !x.Status.Equals("implemented", StringComparison.OrdinalIgnoreCase))
+            .Select(x => x.Key)
+            .Take(8)
+            .ToList();
+        var queueCount = 0;
+        try
+        {
+            queueCount = PlayerStore.Instance?.futurStoreClientIdQueue?.Count ?? 0;
+        }
+        catch
+        {
+            // Native queue can be unavailable during scene transitions.
+        }
+
+        var eventPriceCount = runtime.State.ActiveEvents.Count(x =>
+            Math.Abs(x.PriceModifier) > 0.0001 ||
+            Math.Abs(x.DemandModifier) > 0.0001 ||
+            Math.Abs(x.SupplyModifier) > 0.0001);
+        var activePriceCount = runtime.State.ActiveModifications.Count(x =>
+            x.Field.Equals("price_modifier", StringComparison.OrdinalIgnoreCase));
+        var gapText = gaps.Count == 0 ? "无" : string.Join("、", gaps);
+        return $"\nGM 诊断（仅本地状态）\n" +
+               $"可执行接口：{executable}  | 能力缺口：{gaps.Count}\n" +
+               $"缺口项：{gapText}\n" +
+               $"世界修订：{runtime.State.StateRevision}  | 事件：{runtime.State.ActiveEvents.Count}（有经济影响 {eventPriceCount}）\n" +
+               $"活动价格修正：{activePriceCount}  | 原版未来来客队列：{queueCount}  | 联系任务：{runtime.State.ThirdPartyTasks.Count}";
     }
 
     private static string FormatProcurementStatus(string status) => status switch

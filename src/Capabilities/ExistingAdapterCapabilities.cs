@@ -68,6 +68,11 @@ internal sealed class ExistingAdapterCapabilities
         return NativeWalletAdapter.ApplyConversation(request, response);
     }
 
+    public void RequireThirdPartyContact()
+    {
+        Require("visit.request.third_party");
+    }
+
     private void Require(string capabilityKey)
     {
         if (!_registry.TryGet(capabilityKey, out _))

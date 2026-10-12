@@ -33,20 +33,37 @@ internal static class StoreEventManagerNewsProjectionPatch
     {
         try
         {
-            if (!new StackTrace().ToString().Contains("NewsUIManager", StringComparison.Ordinal))
+            if (!NativeNewsProjectionScope.IsActive &&
+                !new StackTrace().ToString().Contains("NewsUIManager", StringComparison.Ordinal))
                 return;
             var runtime = AIWorldPawnshopMod.Instance?.Runtime;
-            if (runtime is null)
+            if (runtime is null || __result is null)
                 return;
 
-            foreach (var news in runtime.State.News
-                         .Where(x => x.Day == runtime.State.CurrentDay)
-                         .OrderByDescending(x => x.Importance)
-                         .Take(4))
+            var knownIdentifiers = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var merged = new List<StoreEvent>();
+            foreach (var nativeEvent in __result)
             {
-                __result.Add(new StoreEvent
+                if (nativeEvent is null)
+                    continue;
+                var identifier = nativeEvent.identifier ?? string.Empty;
+                if (!string.IsNullOrWhiteSpace(identifier) && !knownIdentifiers.Add(identifier))
+                    continue;
+                merged.Add(nativeEvent);
+            }
+
+            foreach (var news in runtime.State.News
+                         .Where(x => NativeNewsProjectionRules.ShouldProject(runtime.State, x))
+                         .OrderByDescending(x => x.Importance)
+                         .ThenByDescending(x => x.NewsId, StringComparer.Ordinal))
+            {
+                var identifier = "aiworld.news." + news.NewsId;
+                if (!knownIdentifiers.Add(identifier))
+                    continue;
+
+                merged.Add(new StoreEvent
                 {
-                    identifier = "aiworld.news." + news.NewsId,
+                    identifier = identifier,
                     newsName = news.Title,
                     displayName = news.Title,
                     newsDescription = news.Body,
@@ -61,11 +78,68 @@ internal static class StoreEventManagerNewsProjectionPatch
                     isHiddenFromNewsPaper = false
                 });
             }
+
+            var ordered = merged
+                .OrderByDescending(x => x.importance)
+                .ThenByDescending(x => x.startDay)
+                .ThenBy(x => x.identifier, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            __result.Clear();
+            foreach (var item in ordered)
+                __result.Add(item);
         }
         catch (System.Exception ex)
         {
             MelonLoader.MelonLogger.Warning($"[当铺世界] 原版新闻投影失败：{ex.Message}");
         }
+    }
+}
+
+internal static class NativeNewsProjectionScope
+{
+    [ThreadStatic]
+    private static int _depth;
+
+    public static bool IsActive => _depth > 0;
+
+    public static void Enter() => _depth++;
+
+    public static void Exit()
+    {
+        if (_depth > 0)
+            _depth--;
+    }
+}
+
+[HarmonyPatch(typeof(NewsUIManager), nameof(NewsUIManager.PopulateUI))]
+internal static class NewsUiManagerPopulatePatch
+{
+    private static void Prefix(out bool __state)
+    {
+        NativeNewsProjectionScope.Enter();
+        __state = true;
+    }
+
+    private static void Postfix(ref bool __state) => ExitScope(ref __state);
+
+    // Harmony finalizers also run when the original method or another patch
+    // throws.  Keeping an invocation-local flag makes the cleanup idempotent:
+    // the normal Postfix exits once, while an exceptional call is recovered
+    // here without corrupting an outer/nested projection scope.
+    private static System.Exception? Finalizer(
+        System.Exception? __exception,
+        ref bool __state)
+    {
+        ExitScope(ref __state);
+        return __exception;
+    }
+
+    private static void ExitScope(ref bool entered)
+    {
+        if (!entered)
+            return;
+        NativeNewsProjectionScope.Exit();
+        entered = false;
     }
 }
 

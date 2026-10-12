@@ -102,6 +102,32 @@ public sealed class WorldRuntime
                         // amount already extracted from the conversation.
                         if (gm.WalletTransfer.Explicit)
                             response.WalletTransfer = gm.WalletTransfer;
+                        if (response.ThirdPartyTask.Explicit)
+                        {
+                            if (!gm.ThirdPartyTask.Explicit)
+                            {
+                                response.ThirdPartyTask.Accepted = false;
+                                response.NpcReply = ThirdPartyUnavailableReply;
+                            }
+                            else if (!IsSameThirdPartyProposal(
+                                         response.ThirdPartyTask,
+                                         gm.ThirdPartyTask))
+                            {
+                                response.ThirdPartyTask.Accepted = false;
+                                response.ThirdPartyTask.Reason =
+                                    "世界监督结果与人物原提案不一致";
+                                response.NpcReply = ThirdPartyUnavailableReply;
+                            }
+                            else
+                            {
+                                if (!gm.ThirdPartyTask.Accepted)
+                                {
+                                    response.ThirdPartyTask.Accepted = false;
+                                    response.ThirdPartyTask.Reason = gm.ThirdPartyTask.Reason;
+                                    response.NpcReply = ThirdPartyUnavailableReply;
+                                }
+                            }
+                        }
                         response.NpcReply = response.NpcReply.Trim();
                     }
                 }
@@ -179,7 +205,25 @@ public sealed class WorldRuntime
         ConversationActionResolver.Normalize(request, response);
         var gmResult = GmModificationEngine.Apply(State, response.WorldModifications);
         if (gmResult.Applied)
+        {
             _store.Log(gmResult.Message);
+            var economy = NativeWorldEconomyAdapter.ApplyCurrentClient(State);
+            if (economy.Applied && !economy.Verified)
+                _store.Log($"GM 经济修正未能写入当前原版来客：{economy.Message}");
+            _echoWeave.TryRecordWorldOutcome(
+                State.CurrentDay,
+                "world.modify",
+                $"{request.ConversationId}:{request.TurnId}",
+                gmResult.Message + " " + economy.Message,
+                !economy.Applied || economy.Verified
+                    ? EchoWeaveIntentStatus.Fulfilled
+                    : EchoWeaveIntentStatus.Conflict,
+                new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["proposal_count"] = response.WorldModifications.Count.ToString(),
+                    ["native_projection_verified"] = economy.Verified.ToString()
+                });
+        }
         var wallet = _capabilityAdapters.TransferWallet(request, response);
         if (response.BarterProposal.Explicit &&
             response.BarterProposal.Accepted &&
@@ -220,7 +264,7 @@ public sealed class WorldRuntime
         }
         var procurementResolution = ProcurementRequestResolver.Resolve(request, response);
         ApplyConversationResult(request, response);
-        ApplyThirdPartyTask(request, response);
+        var thirdPartyTask = ApplyThirdPartyTask(request, response);
         var returnVisit = _capabilityAdapters.RequestReturnVisit(State, request, response);
         if (returnVisit.Proposed && !returnVisit.Scheduled)
             MelonLogger.Warning($"[当铺世界] 回访未登记：{returnVisit.Message}");
@@ -258,6 +302,30 @@ public sealed class WorldRuntime
                     ["request_key"] = procurement.RequestKey
                 });
         }
+        if (response.ThirdPartyTask.Explicit)
+        {
+            var status = thirdPartyTask?.Status ?? string.Empty;
+            var intentStatus = status switch
+            {
+                "accepted" => EchoWeaveIntentStatus.Scheduled,
+                "proposed" => EchoWeaveIntentStatus.CapabilityPending,
+                "arrived" => EchoWeaveIntentStatus.Scheduled,
+                "fulfilled" => EchoWeaveIntentStatus.Fulfilled,
+                _ => EchoWeaveIntentStatus.Rejected
+            };
+            _echoWeave.TryRecordAdapterOutcome(
+                snapshot,
+                "visit.request.third_party",
+                thirdPartyTask?.OutcomeSummary ??
+                FirstNotBlank(response.ThirdPartyTask.Reason, "第三方联系未通过可执行条件。"),
+                intentStatus,
+                new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["task_key"] = thirdPartyTask?.TaskKey ?? string.Empty,
+                    ["target_key"] = response.ThirdPartyTask.TargetCharacterKey,
+                    ["status"] = status
+                });
+        }
         State.Facts.Add(new FactRecord
         {
             Day = State.CurrentDay,
@@ -275,65 +343,197 @@ public sealed class WorldRuntime
         _echoWeave.Save();
     }
 
-    private void ApplyThirdPartyTask(ConversationRequest request, ConversationResponse response)
+    private ThirdPartyTaskState? ApplyThirdPartyTask(
+        ConversationRequest request,
+        ConversationResponse response)
     {
         var proposal = response.ThirdPartyTask;
+        if (proposal.Explicit)
+            _capabilityAdapters.RequireThirdPartyContact();
         var decision = proposal.Decision.Trim().ToLowerInvariant();
         var pending = State.ThirdPartyTasks.FirstOrDefault(x =>
-            x.TargetCharacterKey.Equals(request.CharacterKey, StringComparison.OrdinalIgnoreCase) &&
+            MatchesThirdPartyTarget(x, request) &&
             (x.Status.Equals("accepted", StringComparison.OrdinalIgnoreCase) ||
-             x.Status.Equals("proposed", StringComparison.OrdinalIgnoreCase)));
-        if (pending is not null && (decision is "accept" or "accepted" or "reject" or "rejected"))
+             x.Status.Equals("proposed", StringComparison.OrdinalIgnoreCase) ||
+             x.Status.Equals("arrived", StringComparison.OrdinalIgnoreCase)));
+        if (pending is not null &&
+            CanResolveThirdPartyDecision(pending, decision, proposal.Explicit))
         {
             pending.Status = decision.StartsWith("accept", StringComparison.OrdinalIgnoreCase) ? "fulfilled" : "declined";
+            if (pending.Status.Equals("declined", StringComparison.OrdinalIgnoreCase) &&
+                pending.NativeQueueScheduled &&
+                pending.NativeQueueOwned &&
+                !string.IsNullOrWhiteSpace(pending.TargetNativeIdentifier) &&
+                pending.NativeQueueDay is int queuedDay)
+            {
+                try
+                {
+                    NativeReturnVisitAdapter.TryRemoveQueuedClient(
+                        PlayerStore.Instance!,
+                        pending.TargetNativeIdentifier,
+                        queuedDay);
+                }
+                catch (Exception ex)
+                {
+                    _store.Log("Third-party queue cancellation failed", ex);
+                }
+            }
             pending.OutcomeSummary = decision.StartsWith("accept", StringComparison.OrdinalIgnoreCase)
                 ? $"{pending.TargetDisplayName}接受了联系请求：{pending.Purpose}"
                 : $"{pending.TargetDisplayName}拒绝了联系请求。";
-            return;
+            State.Facts.Add(new FactRecord
+            {
+                Day = State.CurrentDay,
+                Kind = "third_party_decision",
+                Summary = pending.OutcomeSummary,
+                Visibility = "actor"
+            });
+            return pending;
         }
         if (!proposal.Explicit || !proposal.Accepted ||
             (string.IsNullOrWhiteSpace(proposal.TargetCharacterKey) &&
              string.IsNullOrWhiteSpace(proposal.TargetDisplayName)) ||
             string.IsNullOrWhiteSpace(proposal.Purpose))
-            return;
-        if (!TryResolveThirdPartyTarget(State, proposal, out var targetKey, out var targetName))
-            return;
-        if (targetKey.Equals(request.CharacterKey, StringComparison.OrdinalIgnoreCase))
-            return;
+            return null;
+        if (!TryResolveThirdPartyTarget(
+                State,
+                proposal,
+                out var targetKey,
+                out var targetName,
+                out var targetNativeIdentifier))
+        {
+            RejectThirdPartyProposal(response);
+            return null;
+        }
+        if (targetKey.Equals(request.CharacterKey, StringComparison.OrdinalIgnoreCase) ||
+            (!string.IsNullOrWhiteSpace(targetNativeIdentifier) &&
+             targetNativeIdentifier.Equals(
+                 request.GameContext.Character.OriginalIdentifier,
+                 StringComparison.OrdinalIgnoreCase)))
+        {
+            RejectThirdPartyProposal(response);
+            return null;
+        }
+        if (string.IsNullOrWhiteSpace(targetNativeIdentifier))
+        {
+            RejectThirdPartyProposal(response);
+            return null;
+        }
         var dueInDays = Math.Clamp(proposal.DueInDays, 1, 7);
         var existing = State.ThirdPartyTasks.FirstOrDefault(x =>
             x.SourceCharacterKey.Equals(request.CharacterKey, StringComparison.OrdinalIgnoreCase) &&
             x.TargetCharacterKey.Equals(targetKey, StringComparison.OrdinalIgnoreCase) &&
             x.Status is "proposed" or "accepted");
-        if (existing is not null) return;
+        if (existing is not null) return existing;
         var queueScheduled = false;
+        var queueOwned = false;
+        int? nativeQueueDay = null;
+        var queueMessage = "等待目标人物的原版联系路径确认";
         try
         {
             var playerStore = PlayerStore.Instance;
-            if (playerStore is not null)
-                queueScheduled = NativeReturnVisitAdapter.QueueIfMissing(
+            if (playerStore is not null && !string.IsNullOrWhiteSpace(targetNativeIdentifier))
+            {
+                var queue = NativeReturnVisitAdapter.TryQueue(
                     playerStore,
-                    targetKey,
+                    targetNativeIdentifier,
                     dueInDays);
+                queueScheduled = queue.Scheduled || queue.AlreadyQueued;
+                queueOwned = queue.Scheduled;
+                nativeQueueDay = queue.ExistingDay ?? (queueScheduled ? dueInDays : null);
+                queueMessage = queue.Message;
+            }
         }
         catch (Exception ex)
         {
             _store.Log("Third-party native queue unavailable", ex);
+            queueMessage = "原版来客队列调用失败，等待后续重试";
         }
-        State.ThirdPartyTasks.Add(new ThirdPartyTaskState
+        if (!queueScheduled)
+        {
+            RejectThirdPartyProposal(response);
+            MelonLogger.Warning($"[当铺世界] 第三方联系未登记：{queueMessage}");
+            return null;
+        }
+        var task = new ThirdPartyTaskState
         {
             SourceCharacterKey = request.CharacterKey,
             TargetCharacterKey = targetKey,
+            TargetNativeIdentifier = targetNativeIdentifier,
             TargetDisplayName = targetName,
             Purpose = proposal.Purpose.Trim()[..Math.Min(proposal.Purpose.Trim().Length, 180)],
             CreatedDay = State.CurrentDay,
             DueDay = State.CurrentDay + dueInDays,
             Status = queueScheduled ? "accepted" : "proposed",
             NativeQueueScheduled = queueScheduled,
+            NativeQueueOwned = queueOwned,
+            NativeQueueDay = nativeQueueDay,
             OutcomeSummary = queueScheduled
                 ? $"{request.CharacterDisplayName}答应联系{proposal.TargetDisplayName}：{proposal.Purpose}"
-                : $"{request.CharacterDisplayName}答应尝试联系{proposal.TargetDisplayName}，等待原版来客路径确认。"
+                : $"{request.CharacterDisplayName}答应尝试联系{proposal.TargetDisplayName}：{queueMessage}。"
+        };
+        State.ThirdPartyTasks.Add(task);
+        State.Facts.Add(new FactRecord
+        {
+            Day = State.CurrentDay,
+            Kind = "third_party_contact",
+            Summary = task.OutcomeSummary,
+            Visibility = "actor"
         });
+        return task;
+    }
+
+    private static void RejectThirdPartyProposal(ConversationResponse response)
+    {
+        response.ThirdPartyTask.Accepted = false;
+        response.ThirdPartyTask.Decision = "none";
+        response.NpcReply = ThirdPartyUnavailableReply;
+    }
+
+    private static bool MatchesThirdPartyTarget(
+        ThirdPartyTaskState task,
+        ConversationRequest request)
+    {
+        var originalIdentifier = request.GameContext.Character.OriginalIdentifier;
+        return task.TargetCharacterKey.Equals(request.CharacterKey, StringComparison.OrdinalIgnoreCase) ||
+               task.TargetCharacterKey.Equals(request.GameContext.Character.Key, StringComparison.OrdinalIgnoreCase) ||
+               task.TargetDisplayName.Equals(request.CharacterDisplayName, StringComparison.OrdinalIgnoreCase) ||
+               (!string.IsNullOrWhiteSpace(originalIdentifier) &&
+                task.TargetNativeIdentifier.Equals(originalIdentifier, StringComparison.OrdinalIgnoreCase));
+    }
+
+    public static bool CanResolveThirdPartyDecision(
+        ThirdPartyTaskState task,
+        string? decision,
+        bool explicitProposal = true)
+    {
+        var normalized = decision?.Trim().ToLowerInvariant() ?? string.Empty;
+        return explicitProposal &&
+               task.Status.Equals("arrived", StringComparison.OrdinalIgnoreCase) &&
+               normalized is "accept" or "accepted" or "reject" or "rejected";
+    }
+
+    public static bool IsSameThirdPartyProposal(
+        ThirdPartyTaskProposal characterProposal,
+        ThirdPartyTaskProposal gmProposal)
+    {
+        if (!characterProposal.Explicit || !gmProposal.Explicit)
+            return false;
+
+        var sameTarget = !string.IsNullOrWhiteSpace(characterProposal.TargetCharacterKey)
+            ? characterProposal.TargetCharacterKey.Equals(
+                gmProposal.TargetCharacterKey,
+                StringComparison.OrdinalIgnoreCase)
+            : characterProposal.TargetDisplayName.Equals(
+                gmProposal.TargetDisplayName,
+                StringComparison.OrdinalIgnoreCase);
+        return sameTarget &&
+               characterProposal.Purpose.Trim().Equals(
+                   gmProposal.Purpose.Trim(),
+                   StringComparison.OrdinalIgnoreCase) &&
+               Math.Clamp(characterProposal.DueInDays, 1, 7) ==
+               Math.Clamp(gmProposal.DueInDays, 1, 7) &&
+               (!gmProposal.Accepted || characterProposal.Accepted);
     }
 
     public static bool TryResolveThirdPartyTarget(
@@ -342,26 +542,65 @@ public sealed class WorldRuntime
         out string targetKey,
         out string targetName)
     {
+        return TryResolveThirdPartyTarget(
+            state,
+            proposal,
+            out targetKey,
+            out targetName,
+            out _);
+    }
+
+    private static bool TryResolveThirdPartyTarget(
+        WorldState state,
+        ThirdPartyTaskProposal proposal,
+        out string targetKey,
+        out string targetName,
+        out string targetNativeIdentifier)
+    {
         targetKey = proposal.TargetCharacterKey.Trim();
         if (!state.Characters.ContainsKey(targetKey))
         {
-            targetKey = state.Characters.Values
-                .FirstOrDefault(x => x.DisplayName.Equals(
+            var matches = state.Characters.Values
+                .Where(x => x.DisplayName.Equals(
                     proposal.TargetDisplayName,
-                    StringComparison.OrdinalIgnoreCase))?
-                .CharacterKey ?? string.Empty;
+                    StringComparison.OrdinalIgnoreCase))
+                .Take(2)
+                .ToList();
+            targetKey = matches.Count == 1
+                ? matches[0].CharacterKey
+                : string.Empty;
         }
         if (string.IsNullOrWhiteSpace(targetKey))
         {
             targetName = string.Empty;
+            targetNativeIdentifier = string.Empty;
             return false;
         }
 
         targetName = state.Characters.TryGetValue(targetKey, out var targetCharacter)
             ? FirstNotBlank(proposal.TargetDisplayName, targetCharacter.DisplayName, targetKey)
             : FirstNotBlank(proposal.TargetDisplayName, targetKey);
+        // Never feed the Mod's canonical key into the native queue.  A queue
+        // entry is only safe when the original identifier was observed from
+        // the game's StoreClient blueprint.
+        targetNativeIdentifier = targetCharacter is { CanReturn: true } or { CanReturnAsBuyer: true }
+            ? targetCharacter.OriginalIdentifier?.Trim() ?? string.Empty
+            : string.Empty;
         return true;
     }
+
+    public static bool TryResolveThirdPartyNativeIdentifier(
+        WorldState state,
+        ThirdPartyTaskProposal proposal,
+        out string targetKey,
+        out string targetName,
+        out string targetNativeIdentifier) =>
+        TryResolveThirdPartyTarget(
+            state,
+            proposal,
+            out targetKey,
+            out targetName,
+            out targetNativeIdentifier);
 
     public bool ApplyNativeConversationActions(
         ConversationRequest request,
@@ -457,17 +696,70 @@ public sealed class WorldRuntime
         if (State.LastDailyResolutionHash == resolutionKey)
             return;
 
-        State.ActiveEvents.RemoveAll(x => State.CurrentDay >= x.StartDay + x.DurationDays);
-        State.ActiveModifications.RemoveAll(x => x.DurationDays > 0 && State.CurrentDay >= x.StartDay + x.DurationDays);
+        var expiredEvents = State.ActiveEvents
+            .Where(x => State.CurrentDay >= x.StartDay + x.DurationDays)
+            .ToList();
+        var expiredModifications = State.ActiveModifications
+            .Where(x => x.DurationDays > 0 && State.CurrentDay >= x.StartDay + x.DurationDays)
+            .ToList();
+        State.ActiveEvents.RemoveAll(x => expiredEvents.Contains(x));
+        State.ActiveModifications.RemoveAll(x => expiredModifications.Contains(x));
+        foreach (var expired in expiredEvents)
+        {
+            _echoWeave.TryRecordWorldOutcome(
+                State.CurrentDay,
+                "world.propose.event",
+                expired.EventKey,
+                $"跨天事件结束：{expired.Title}",
+                EchoWeaveIntentStatus.Expired);
+        }
+        foreach (var expired in expiredModifications)
+        {
+            _echoWeave.TryRecordWorldOutcome(
+                State.CurrentDay,
+                "world.modify",
+                expired.ModificationId,
+                $"世界修正到期并恢复：{expired.Title}",
+                EchoWeaveIntentStatus.Expired,
+                new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["target_key"] = expired.TargetKey,
+                    ["field"] = expired.Field
+                });
+        }
         foreach (var task in State.ThirdPartyTasks.Where(x =>
                      (x.Status.Equals("accepted", StringComparison.OrdinalIgnoreCase) ||
-                      x.Status.Equals("proposed", StringComparison.OrdinalIgnoreCase)) &&
-                     State.CurrentDay > x.DueDay))
+                      x.Status.Equals("proposed", StringComparison.OrdinalIgnoreCase) ||
+                      x.Status.Equals("arrived", StringComparison.OrdinalIgnoreCase)) &&
+                     State.CurrentDay > x.DueDay +
+                     (x.Status.Equals("arrived", StringComparison.OrdinalIgnoreCase) ? 1 : 0)))
         {
+            if (task.NativeQueueOwned &&
+                task.NativeQueueDay is int queuedDay &&
+                !string.IsNullOrWhiteSpace(task.TargetNativeIdentifier))
+            {
+                try
+                {
+                    NativeReturnVisitAdapter.TryRemoveQueuedClient(
+                        PlayerStore.Instance!,
+                        task.TargetNativeIdentifier,
+                        queuedDay);
+                }
+                catch (Exception ex)
+                {
+                    _store.Log("Expired third-party queue cleanup failed", ex);
+                }
+            }
             task.Status = "expired";
             task.OutcomeSummary = task.NativeQueueScheduled
                 ? "联系安排超过期限，未得到回应。"
                 : "联系任务未能进入原版来客队列，已超过等待期限。";
+            _echoWeave.TryRecordWorldOutcome(
+                State.CurrentDay,
+                "visit.request.third_party",
+                task.TaskKey,
+                task.OutcomeSummary,
+                EchoWeaveIntentStatus.Expired);
         }
         NativeReturnVisitAdapter.DeferMissedVisits(State);
         NativeProcurementAdapter.ResolveDueRequests(State);
@@ -485,9 +777,34 @@ public sealed class WorldRuntime
                 Importance = eventState.NewsImportance,
                 SourceEventKey = eventState.EventKey
             });
+            _echoWeave.TryRecordWorldOutcome(
+                State.CurrentDay,
+                "world.propose.event",
+                eventState.EventKey,
+                $"每日事件生成并发布：{eventState.Title}",
+                EchoWeaveIntentStatus.Fulfilled,
+                new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["item_group"] = eventState.ItemGroup,
+                    ["duration_days"] = eventState.DurationDays.ToString(),
+                    ["news_importance"] = eventState.NewsImportance.ToString()
+                });
         }
 
         State.LastDailyResolutionHash = resolutionKey;
+        var economyRefreshed = NativeWorldEconomyAdapter.RefreshCurrentClient(State);
+        if ((expiredEvents.Count > 0 || expiredModifications.Count > 0 || newEvents.Count > 0) &&
+            PlayerStore.Instance?.currentClientInstance is not null &&
+            !economyRefreshed)
+        {
+            _store.Log("Cross-day native economy refresh was not verified.");
+            _echoWeave.TryRecordWorldOutcome(
+                State.CurrentDay,
+                "world.modify",
+                $"day-refresh:{State.CurrentDay}",
+                "换日后当前顾客的原版经济字段未能完成校验。",
+                EchoWeaveIntentStatus.Conflict);
+        }
         State.TouchRevision();
         _store.SaveWorld(State);
         _echoWeave.Save();
@@ -536,6 +853,7 @@ public sealed class WorldRuntime
         try
         {
             var changed = NativeReturnVisitAdapter.RecordArrival(State, client);
+            changed |= NativeReturnVisitAdapter.RecordThirdPartyArrival(State, client);
             if (string.IsNullOrWhiteSpace(requestKey))
                 changed |= TemporaryClientInventoryAdapter.InjectForBuyer(State, client, instance);
             changed |= NativeProcurementAdapter.CompleteClientCreation(
@@ -543,6 +861,34 @@ public sealed class WorldRuntime
                     requestKey,
                     client,
                     instance);
+            var economy = NativeWorldEconomyAdapter.ApplyCurrentClient(State);
+            var nativeIdentifier = client?.identifier ?? string.Empty;
+            if (economy.Applied)
+            {
+                _echoWeave.TryRecordWorldOutcome(
+                    State.CurrentDay,
+                    "world.modify",
+                    $"client:{nativeIdentifier}:{State.CurrentDay}",
+                    economy.Message,
+                    economy.Verified
+                        ? EchoWeaveIntentStatus.Fulfilled
+                        : EchoWeaveIntentStatus.Conflict,
+                    new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                    {
+                        ["native_projection_verified"] = economy.Verified.ToString()
+                    });
+            }
+            foreach (var arrived in State.ThirdPartyTasks.Where(x =>
+                         x.ArrivedDay == State.CurrentDay &&
+                         x.TargetNativeIdentifier.Equals(nativeIdentifier, StringComparison.OrdinalIgnoreCase)))
+            {
+                _echoWeave.TryRecordWorldOutcome(
+                    State.CurrentDay,
+                    "visit.request.third_party",
+                    arrived.TaskKey,
+                    arrived.OutcomeSummary,
+                    EchoWeaveIntentStatus.Ready);
+            }
             if (changed)
             {
                 State.TouchRevision();
@@ -593,6 +939,7 @@ public sealed class WorldRuntime
         try
         {
             var changed = NativeProcurementAdapter.RecordClientDismissed(State, client);
+            NativeWorldEconomyAdapter.RestoreClient(client);
             changed |= TemporaryClientInventoryAdapter.RestoreBuyerIntent(State, client);
             if (changed)
             {
@@ -640,7 +987,11 @@ public sealed class WorldRuntime
         response.BarterProposal = new BarterProposal();
         response.WalletTransfer = new WalletTransferProposal();
         response.WorldModifications = new List<WorldModificationProposal>();
+        response.ThirdPartyTask = new ThirdPartyTaskProposal();
     }
+
+    public static void StripUnsafeWorldActions(ConversationResponse response) =>
+        StripWorldActions(response);
 
     private void RebuildModelProvider()
     {
@@ -684,6 +1035,9 @@ public sealed class WorldRuntime
     private static bool ContainsAny(string value, params string[] terms) =>
         terms.Any(term => value.Contains(term, StringComparison.OrdinalIgnoreCase));
 
+    private const string ThirdPartyUnavailableReply =
+        "这件事我现在没法替你安排，你还是直接找对方谈吧。";
+
     private void ApplyConversationResult(ConversationRequest request, ConversationResponse response)
     {
         var characterKey = FirstNotBlank(
@@ -712,8 +1066,12 @@ public sealed class WorldRuntime
                 DisplayName = string.IsNullOrWhiteSpace(request.CharacterDisplayName)
                     ? characterKey
                     : request.CharacterDisplayName,
+                OriginalIdentifier = request.GameContext.Character.OriginalIdentifier,
+                OriginalRealName = request.GameContext.Character.OriginalRealName,
                 FactionKey = factionKey,
-                IsNamedSpecialCharacter = true
+                IsNamedSpecialCharacter = true,
+                CanReturn = request.GameContext.Character.CanReturn,
+                CanReturnAsBuyer = request.GameContext.Character.CanReturnAsBuyer
             };
             State.Characters[characterKey] = character;
         }
@@ -722,8 +1080,14 @@ public sealed class WorldRuntime
             character.IsNamedSpecialCharacter = true;
             if (!string.IsNullOrWhiteSpace(request.CharacterDisplayName))
                 character.DisplayName = request.CharacterDisplayName;
+            if (!string.IsNullOrWhiteSpace(request.GameContext.Character.OriginalIdentifier))
+                character.OriginalIdentifier = request.GameContext.Character.OriginalIdentifier;
+            if (!string.IsNullOrWhiteSpace(request.GameContext.Character.OriginalRealName))
+                character.OriginalRealName = request.GameContext.Character.OriginalRealName;
             if (!string.IsNullOrWhiteSpace(factionKey))
                 character.FactionKey = factionKey;
+            character.CanReturn |= request.GameContext.Character.CanReturn;
+            character.CanReturnAsBuyer |= request.GameContext.Character.CanReturnAsBuyer;
         }
 
         if (character is not null)

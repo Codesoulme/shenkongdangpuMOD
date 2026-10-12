@@ -37,12 +37,39 @@ internal static class NativeConversationContextBuilder
             AddProcurementContext(context, characterKey, world);
             AddWorldEvents(context, world);
             context.GmKnowledge = GmKnowledgeCatalog.Build(world);
+            context.KnownCharacters = world.Characters.Values
+                .Where(x => !string.IsNullOrWhiteSpace(x.CharacterKey) &&
+                            !x.CharacterKey.Equals(characterKey, StringComparison.OrdinalIgnoreCase))
+                .OrderByDescending(x => x.LastInteractionDay ?? -1)
+                .ThenByDescending(x => x.InteractionCount)
+                .Take(48)
+                .Select(x => new KnownCharacterContext
+                {
+                    Key = x.CharacterKey,
+                    DisplayName = x.DisplayName,
+                    NativeIdentifier = x.OriginalIdentifier,
+                    FactionKey = x.FactionKey,
+                    CanReturn = x.CanReturn
+                })
+                .ToList();
+            var nativeIdentity = context.Character.OriginalIdentifier;
+            var canonicalIdentity = context.Character.Key;
             context.ThirdPartyTasks = world.ThirdPartyTasks
-                .Where(x => x.Status.Equals("accepted", StringComparison.OrdinalIgnoreCase) &&
+                .Where(x => IsOpenThirdPartyStatus(x.Status) &&
                             (x.SourceCharacterKey.Equals(characterKey, StringComparison.OrdinalIgnoreCase) ||
-                             x.TargetCharacterKey.Equals(characterKey, StringComparison.OrdinalIgnoreCase)))
+                             x.SourceCharacterKey.Equals(canonicalIdentity, StringComparison.OrdinalIgnoreCase) ||
+                             x.TargetCharacterKey.Equals(characterKey, StringComparison.OrdinalIgnoreCase) ||
+                             x.TargetCharacterKey.Equals(canonicalIdentity, StringComparison.OrdinalIgnoreCase) ||
+                             (!string.IsNullOrWhiteSpace(nativeIdentity) &&
+                              x.TargetNativeIdentifier.Equals(nativeIdentity, StringComparison.OrdinalIgnoreCase))))
                 .Take(8)
-                .Select(x => $"{x.SourceCharacterKey}→{x.TargetDisplayName}：{x.Purpose}，状态 {x.Status}，期限第 {x.DueDay} 天")
+                .Select(x =>
+                {
+                    var sourceName = world.Characters.TryGetValue(x.SourceCharacterKey, out var source)
+                        ? FirstNotBlank(source.DisplayName, x.SourceCharacterKey)
+                        : x.SourceCharacterKey;
+                    return $"{sourceName}请你处理联系请求：{x.Purpose}，状态 {x.Status}，期限第 {x.DueDay} 天";
+                })
                 .ToList();
         }
         catch (Exception ex)
@@ -489,16 +516,6 @@ internal static class NativeConversationContextBuilder
         trade.ClientBudget = client.useClientBudget ? client.clientBudget : null;
         trade.ClientBuyPriceModifier = client.buyPriceModifier;
         trade.ClientSellPriceModifier = client.sellPriceModifier;
-        var globalPrice = world.ActiveModifications
-            .Where(x => x.TargetKey.Equals("global", StringComparison.OrdinalIgnoreCase) &&
-                        x.Field.Equals("price_modifier", StringComparison.OrdinalIgnoreCase))
-            .Sum(x => x.Value);
-        if (Math.Abs(globalPrice) > 0.0001)
-        {
-            var points = (int)Math.Round(globalPrice * 100d);
-            trade.ClientBuyPriceModifier = Math.Clamp(trade.ClientBuyPriceModifier + points, -100, 100);
-            trade.ClientSellPriceModifier = Math.Clamp(trade.ClientSellPriceModifier + points, -100, 100);
-        }
         trade.ClientImpatience = client.clientImpatience;
 
         // Capture ownership once so items moved from a customer's inventory to
@@ -906,6 +923,11 @@ internal static class NativeConversationContextBuilder
                 .ToList();
         }
     }
+
+    private static bool IsOpenThirdPartyStatus(string status) =>
+        status.Equals("accepted", StringComparison.OrdinalIgnoreCase) ||
+        status.Equals("proposed", StringComparison.OrdinalIgnoreCase) ||
+        status.Equals("arrived", StringComparison.OrdinalIgnoreCase);
 
     private static void AddProcurementContext(
         GameConversationContext context,

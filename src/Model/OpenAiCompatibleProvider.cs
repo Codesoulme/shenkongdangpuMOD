@@ -72,6 +72,7 @@ public sealed class OpenAiCompatibleProvider : IModelProvider
             Procurement = source.Procurement,
             ActiveWorldEvents = source.ActiveWorldEvents,
             ThirdPartyTasks = source.ThirdPartyTasks,
+            KnownCharacters = source.KnownCharacters,
             GmKnowledge = new List<string>()
         };
         return new ConversationRequest
@@ -108,7 +109,8 @@ public sealed class OpenAiCompatibleProvider : IModelProvider
                 .Concat(new[]
                 {
                     $"人物候选回复：{candidateResponse.NpcReply}",
-                    $"人物候选转账提案：explicit={candidateResponse.WalletTransfer.Explicit}, accepted={candidateResponse.WalletTransfer.Accepted}, amount={candidateResponse.WalletTransfer.Amount}, source={candidateResponse.WalletTransfer.Source}"
+                    $"人物候选转账提案：explicit={candidateResponse.WalletTransfer.Explicit}, accepted={candidateResponse.WalletTransfer.Accepted}, amount={candidateResponse.WalletTransfer.Amount}, source={candidateResponse.WalletTransfer.Source}",
+                    $"人物候选第三方联系：explicit={candidateResponse.ThirdPartyTask.Explicit}, accepted={candidateResponse.ThirdPartyTask.Accepted}, target_key={candidateResponse.ThirdPartyTask.TargetCharacterKey}, target_name={candidateResponse.ThirdPartyTask.TargetDisplayName}, purpose={candidateResponse.ThirdPartyTask.Purpose}, due_in_days={candidateResponse.ThirdPartyTask.DueInDays}, decision={candidateResponse.ThirdPartyTask.Decision}"
                 })
                 .TakeLast(10)
                 .ToList(),
@@ -1066,7 +1068,7 @@ public sealed class OpenAiCompatibleProvider : IModelProvider
         return false;
     }
 
-    private const string GmSystemPrompt = @"你是 GM 监督 AI，不扮演人物。只分析当前玩家输入、原版上下文、人物候选回复、人物候选转账提案和 gm_knowledge，先识别目标，再按目标路径优先级选择当前状态满足条件的已有接口；直接路径不可用时选择备用路径。只能返回 JSON；npc_reply 固定填写 GM，world_modifications 只填写已确认可执行且可验证的计划，并填写 goal、path。若人物候选转账提案 explicit=true，你必须复核人物候选回复是否明确答应从当前顾客 client_budget 补付该具体金额：合理且可验证时输出同金额的 wallet_transfer 且 accepted=true，不合理或接口前置条件不满足时输出 wallet_transfer explicit=true、accepted=false；若没有候选转账提案且对话没有明确承诺，不得自行创造转账。source 固定为 client_budget。找不到合理落点时保持 world_modifications 为空。不得创造接口、字段、物品或机制。\n物品归属复核：trade.item.owner、client_carried_items 中的 owner 和 player_offered_items 中的 owner 是原版归属结论。owner=client 或界面“未拥有”表示顾客带来的物品，即使物品在玩家侧柜台、正在议价或 GetCountersItems() 返回了它，也不能当成玩家物品；只有 owner=player 的真实玩家侧物品才可作为玩家交换物。owner=unknown 时拒绝猜测并让相关提案保持未接受。identifier、internal_name、display_name、tags、condition_identifier 仅用于区分物品，不能推翻 owner。\n";
+    private const string GmSystemPrompt = @"你是 GM 监督 AI，不扮演人物。只分析当前玩家输入、原版上下文、人物候选回复、人物候选结构化提案和 gm_knowledge，先识别目标，再按目标路径优先级选择当前状态满足条件的已有接口；直接路径不可用时选择备用路径。只能返回 JSON；npc_reply 固定填写 GM，world_modifications 只填写已确认可执行且可验证的计划，并填写 goal、path。若人物候选转账提案 explicit=true，你必须复核人物候选回复是否明确答应从当前顾客 client_budget 补付该具体金额：合理且可验证时输出同金额的 wallet_transfer 且 accepted=true，不合理或接口前置条件不满足时输出 wallet_transfer explicit=true、accepted=false；若没有候选转账提案且对话没有明确承诺，不得自行创造转账。source 固定为 client_budget。若人物候选第三方联系 explicit=true，只能在当前人物明确答应、目标人物能从已有人物目录唯一解析且能力目录含 visit.request.third_party 时保留完全相同的目标、目的、期限；条件不满足时返回同一 third_party_task 且 accepted=false，不得换成另一个人物。人物候选没有第三方提案时不得自行创建。目标人物本人处理状态为 arrived 的任务时，decision 才能填写 accept 或 reject。找不到合理落点时保持 world_modifications 为空。不得创造接口、字段、物品或机制。\n物品归属复核：trade.item.owner、client_carried_items 中的 owner 和 player_offered_items 中的 owner 是原版归属结论。owner=client 或界面“未拥有”表示顾客带来的物品，即使物品在玩家侧柜台、正在议价或 GetCountersItems() 返回了它，也不能当成玩家物品；只有 owner=player 的真实玩家侧物品才可作为玩家交换物。owner=unknown 时拒绝猜测并让相关提案保持未接受。identifier、internal_name、display_name、tags、condition_identifier 仅用于区分物品，不能推翻 owner。\n";
 
     private const string ConversationSystemPrompt = @"你负责扮演人物并提取玩家的明确意图；世界数值和已有接口的最终裁决由另一个 GM 监督步骤完成。人物不得声称未经原版流程确认的价格、交换、预算或世界变化已经生效，也不要向玩家暴露内部审核过程；world_modifications 通常留空，未知字段、虚构接口和无法验证的因果链不要填写。
 你正在扮演《深空当铺》当前场景中的原版人物，而不是另一个平行角色。
@@ -1082,7 +1084,7 @@ procurement 用于“玩家请当前顾客未来寻找并带来某类货物”�
 必须只返回一个 JSON 对象。字段严格为：npc_reply（字符串）、conversation_mode（continue 或 return_to_task）、topic（字符串）、task_relevance（0 到 1）、mood（字符串）、signals（对象，含 warmth、respect、trust、offense、threat、cooperation、credibility、trade_willingness 八个整数）、memory_candidates（数组，元素含 kind、summary、importance）、trade_proposal（对象，含 kind、percent、target_amount、explicit、reason）、wallet_transfer（对象，含 explicit、accepted、amount、source、reason）、procurement_proposal（对象，含 explicit、accepted、category、category_confidence、clarification_needed、requested_description、due_in_days、promised_premium_percent、reason）、return_visit_proposal（对象，含 explicit、accepted、due_in_days、reason）、carried_inventory_proposal（对象，含 explicit、accepted、reason）、barter_proposal（对象，含 explicit、accepted、client_item_runtime_key、client_item_name、required_player_item_runtime_key、required_player_item_runtime_keys、required_player_item_key、required_player_item_name、required_player_item_keys、required_player_item_names、reason）、third_party_task（对象，含 explicit、accepted、target_character_key、target_display_name、purpose、due_in_days、reason、decision）。
 所有 signals 值必须为 -2 到 2 的整数；importance 为 0 到 1；没有明确议价时 trade_proposal 必须为 {""kind"":""none"",""percent"":0,""target_amount"":null,""explicit"":false,""reason"":""""}。没有对应行为时，新增 proposal 的 explicit 和 accepted 都必须为 false。";
 
-    private const string ThirdPartyTaskRules = "third_party_task 只用于玩家明确请当前人物联系另一个已知人物，且人物在 npc_reply 中明确答应；目标人物必须来自原版上下文或 gm_knowledge，不得创造身份。";
+    private const string ThirdPartyTaskRules = "third_party_task 只用于玩家明确请当前人物联系另一个已知人物，且人物在 npc_reply 中明确答应；目标人物必须来自 known_characters、原版上下文或 GM 可见的人物目录，不得创造身份。提案必须使用目录中的稳定 key 和原显示名；无法唯一对应时自然拒绝或追问，accepted=false。third_party_tasks 中状态为 arrived 且当前人物就是目标时，人物可以独立选择 decision=accept 或 reject；传话人此前答应不等于目标同意。";
 
     private sealed class RequestAttempt
     {

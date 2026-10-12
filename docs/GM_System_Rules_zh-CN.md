@@ -9,9 +9,9 @@ GM 系统是第二 AI 与游戏状态之间的受限边界。第二 AI 只提出
 - 对话上下文的 `gm_knowledge` 会携带这些知识和当前世界摘要。
 - `GmInterfaceCatalog` 是接口目录：`implemented` 且 `CanModify=true` 的项目才允许规划执行；`discovered` 只代表从原版转储确认存在，不能当作已接入能力。
 - 每个可修改接口还必须绑定 `IGmValueExecutor` 的 `Read`、`Write`、`Verify` 三步。写入后验证失败会撤销本次修正，不生成新闻或玩家提示；没有这三步的接口只能供 GM AI 分析，不能承诺执行。
-- 已建立的执行器映射：`trade.adjust.selected` → `NativeTradeAdapter`；`procurement.request.goods` → `NativeProcurementAdapter`；`visit.request.self` → `NativeReturnVisitAdapter`；`inventory.reveal.carried` → `TemporaryClientInventoryAdapter`；`barter.open.native` → `NativeBarterAdapter`；`wallet.transfer.native` → `NativeWalletAdapter`；`world.modify` → `GmModificationEngine`。
-- 每日事件在换日时按世界种子和日期确定性选择一至两个候选并写入新闻流；原版 `NewsUIManager.PopulateUI` 已登记但尚未确认安全注入点，因此当前通过 Mod 世界页面呈现。
-- 第三方联系任务第一版会记录来源人物、目标人物、目的和到期日，跨天保存在 `ThirdPartyTasks`；它是私人任务，只在联系安排页面显示，不自动写入世界新闻。目标人物在后续对话中可通过 `decision=accept/reject` 作出二次决定，超期自动标记为 expired。原版来客队列接入仍需后续完成。
+- 已建立的执行器映射：`trade.adjust.selected` → `NativeTradeAdapter`；`procurement.request.goods` → `NativeProcurementAdapter`；`visit.request.self` 与 `visit.request.third_party` → `NativeReturnVisitAdapter`；`inventory.reveal.carried` → `TemporaryClientInventoryAdapter`；`barter.open.native` → `NativeBarterAdapter`；`wallet.transfer.native` → `NativeWalletAdapter`；`world.modify` → `GmModificationEngine`。
+- 每日事件在换日时按世界种子和日期确定性选择一至两个候选并写入新闻流；`NewsUIManager.PopulateUI` 读取原版事件时会合并当前日期的 Mod 新闻，按重要性和日期排序并按标识去重。原版新闻窗口不可用时，完整记录仍在 Mod 世界页面显示。
+- 第三方联系任务记录来源人物、目标人物、原版人物标识、目的和到期日，跨天保存在 `ThirdPartyTasks`；它是私人任务，不自动写入世界新闻。只有已确认且标记可回访的原版人物标识才会进入 `futurStoreClientIdQueue`；重名、缺少标识或队列冲突时人物自然拒绝，不保存虚假安排。目标到店后进入 `arrived`，后续通过 `decision=accept/reject` 作出二次决定，超期自动标记为 expired。
 
 ## 提案格式
 

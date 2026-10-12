@@ -25,6 +25,11 @@ public static class GmModificationEngine
                 x.StartDay == state.CurrentDay);
             if (existing is not null)
             {
+                var previousValue = existing.Value;
+                var previousDuration = existing.DurationDays;
+                var previousTitle = existing.Title;
+                var previousSummary = existing.Summary;
+                var previousEvidence = existing.Evidence;
                 var nextValue = proposal.Operation.Equals("replace", StringComparison.OrdinalIgnoreCase)
                     ? value : Math.Clamp(existing.Value + value, -0.50, 0.50);
                 var nextDuration = proposal.Operation.Equals("replace", StringComparison.OrdinalIgnoreCase)
@@ -47,6 +52,16 @@ public static class GmModificationEngine
                 existing.Evidence = nextEvidence;
                 if (changed)
                 {
+                    if (!Executors.TryGet(existing.ExecutorKey, out var updateExecutor) ||
+                        !updateExecutor.Verify(state, key, field, nextValue))
+                    {
+                        existing.Value = previousValue;
+                        existing.DurationDays = previousDuration;
+                        existing.Title = previousTitle;
+                        existing.Summary = previousSummary;
+                        existing.Evidence = previousEvidence;
+                        continue;
+                    }
                     state.News.Add(new NewsRecord
                     {
                         Day = state.CurrentDay,

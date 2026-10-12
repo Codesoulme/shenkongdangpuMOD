@@ -62,7 +62,7 @@ public sealed class JsonFileStore
         var state = File.Exists(path)
             ? Read<WorldState>(path) ?? new WorldState { WorldId = worldId }
             : new WorldState { WorldId = worldId };
-        NormalizeWorld(state, worldId);
+        NormalizeLoadedWorld(state, worldId);
         return state;
     }
 
@@ -83,7 +83,7 @@ public sealed class JsonFileStore
     private string GetWorldPath(string worldId) =>
         Path.Combine(_root, "Worlds", $"{worldId}.json");
 
-    private static void NormalizeWorld(WorldState state, string worldId)
+    public static void NormalizeLoadedWorld(WorldState state, string worldId)
     {
         state.SchemaVersion = ModConstants.SchemaVersion;
         if (string.IsNullOrWhiteSpace(state.WorldId))
@@ -98,11 +98,13 @@ public sealed class JsonFileStore
             ? new Dictionary<string, CharacterState>(StringComparer.OrdinalIgnoreCase)
             : new Dictionary<string, CharacterState>(state.Characters, StringComparer.OrdinalIgnoreCase);
         state.ActiveEvents ??= new List<WorldEventState>();
+        state.ActiveModifications ??= new List<WorldModificationState>();
         state.Facts ??= new List<FactRecord>();
         state.News ??= new List<NewsRecord>();
         state.ProcurementRequests ??= new List<ProcurementRequestState>();
         state.ReturnVisits ??= new List<ReturnVisitState>();
         state.CarriedInventories ??= new List<CarriedInventoryState>();
+        state.ThirdPartyTasks ??= new List<ThirdPartyTaskState>();
 
         foreach (var faction in state.Factions.Values.Where(x => x is not null))
         {
@@ -115,8 +117,38 @@ public sealed class JsonFileStore
         {
             character.CharacterKey ??= string.Empty;
             character.DisplayName ??= string.Empty;
+            character.OriginalIdentifier ??= string.Empty;
+            character.OriginalRealName ??= string.Empty;
             character.FactionKey ??= string.Empty;
             character.Memories ??= new List<MemoryRecord>();
+        }
+
+        foreach (var worldEvent in state.ActiveEvents.Where(x => x is not null))
+        {
+            worldEvent.EventKey ??= string.Empty;
+            worldEvent.Title ??= string.Empty;
+            worldEvent.Summary ??= string.Empty;
+            worldEvent.ItemGroup ??= string.Empty;
+        }
+
+        foreach (var modification in state.ActiveModifications.Where(x => x is not null))
+        {
+            modification.ModificationId ??= Guid.NewGuid().ToString("N");
+            modification.TargetKey ??= string.Empty;
+            modification.Field ??= string.Empty;
+            modification.Title ??= string.Empty;
+            modification.Summary ??= string.Empty;
+            modification.Evidence ??= string.Empty;
+            modification.Source ??= "gm";
+            modification.ExecutorKey ??= "world.modify";
+        }
+
+        foreach (var news in state.News.Where(x => x is not null))
+        {
+            news.NewsId ??= Guid.NewGuid().ToString("N");
+            news.Title ??= string.Empty;
+            news.Body ??= string.Empty;
+            news.SourceEventKey ??= string.Empty;
         }
 
         foreach (var request in state.ProcurementRequests.Where(x => x is not null))
@@ -136,6 +168,18 @@ public sealed class JsonFileStore
             request.ResolvedItemName ??= string.Empty;
             request.ResolvedRarityLabel ??= string.Empty;
             request.OutcomeSummary ??= string.Empty;
+        }
+
+        foreach (var task in state.ThirdPartyTasks.Where(x => x is not null))
+        {
+            task.TaskKey ??= Guid.NewGuid().ToString("N");
+            task.SourceCharacterKey ??= string.Empty;
+            task.TargetCharacterKey ??= string.Empty;
+            task.TargetNativeIdentifier ??= string.Empty;
+            task.TargetDisplayName ??= string.Empty;
+            task.Purpose ??= string.Empty;
+            task.Status ??= "proposed";
+            task.OutcomeSummary ??= string.Empty;
         }
     }
 

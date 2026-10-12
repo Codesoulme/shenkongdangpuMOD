@@ -97,6 +97,17 @@ public sealed class GameConversationContext
     public List<string> GmKnowledge { get; set; } = new();
     [JsonPropertyName("third_party_tasks")]
     public List<string> ThirdPartyTasks { get; set; } = new();
+    [JsonPropertyName("known_characters")]
+    public List<KnownCharacterContext> KnownCharacters { get; set; } = new();
+}
+
+public sealed class KnownCharacterContext
+{
+    [JsonPropertyName("key")] public string Key { get; set; } = string.Empty;
+    [JsonPropertyName("display_name")] public string DisplayName { get; set; } = string.Empty;
+    [JsonPropertyName("native_identifier")] public string NativeIdentifier { get; set; } = string.Empty;
+    [JsonPropertyName("faction_key")] public string FactionKey { get; set; } = string.Empty;
+    [JsonPropertyName("can_return")] public bool CanReturn { get; set; }
 }
 
 public sealed class WorldModificationProposal
