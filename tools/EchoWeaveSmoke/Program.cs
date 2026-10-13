@@ -32,6 +32,7 @@ try
     ModelCasualTurnUsesCompactRequestFlow();
     ModelDetailedTurnUsesScopedInstructionsFlow();
     OriginalWorldLoreFlow();
+    GameKnowledgeFingerprintAndVisibilityFlow();
     GmReviewRoutingFlow();
     ThirdPartyTaskCanonicalizationFlow();
     ThirdPartyCapabilityMappingFlow();
@@ -675,6 +676,7 @@ void ModelCasualTurnUsesCompactRequestFlow()
         GameContext = new GameConversationContext
         {
             OriginalCharacterProfile = CreateLoreProfile(),
+            RelevantGameKnowledge = new List<string> { "VISIBLE_CATALOG_MARKER" },
             GmKnowledge = new List<string> { "GM_ONLY_MARKER" },
             KnownCharacters = new List<KnownCharacterContext>
             {
@@ -702,6 +704,7 @@ void ModelCasualTurnUsesCompactRequestFlow()
            !payload.Contains("LARGE_DIRECTORY_MARKER", StringComparison.Ordinal) &&
            !payload.Contains("LARGE_PROCUREMENT_MARKER", StringComparison.Ordinal) &&
            !payload.Contains("GM_ONLY_MARKER", StringComparison.Ordinal) &&
+           payload.Contains("VISIBLE_CATALOG_MARKER", StringComparison.Ordinal) &&
            payload.Contains("world_background", StringComparison.Ordinal) &&
            payload.Contains("faction_background", StringComparison.Ordinal) &&
            maxTokens <= 220,
@@ -729,6 +732,7 @@ void ModelDetailedTurnUsesScopedInstructionsFlow()
                 GameContext = new GameConversationContext
                 {
                     OriginalCharacterProfile = CreateLoreProfile(),
+                    RelevantGameKnowledge = new List<string> { "VISIBLE_SCOPED_CATALOG_MARKER" },
                     Procurement = new ProcurementConversationContext
                     {
                         RarityBasis = "IRRELEVANT_PROCUREMENT_MARKER"
@@ -759,6 +763,7 @@ void ModelDetailedTurnUsesScopedInstructionsFlow()
            !prompt.Contains("未来找货规则", StringComparison.Ordinal) &&
            !payload.Contains("IRRELEVANT_PROCUREMENT_MARKER", StringComparison.Ordinal) &&
            !payload.Contains("IRRELEVANT_DIRECTORY_MARKER", StringComparison.Ordinal) &&
+           payload.Contains("VISIBLE_SCOPED_CATALOG_MARKER", StringComparison.Ordinal) &&
            payload.Contains("world_background", StringComparison.Ordinal) &&
            payload.Contains("faction_background", StringComparison.Ordinal) &&
            maxTokens <= 360,
@@ -787,6 +792,66 @@ void OriginalWorldLoreFlow()
     OriginalWorldLoreCatalog.AddGmKnowledge(gmKnowledge);
     Assert(gmKnowledge.Any(x => x.Contains("脑部植入物", StringComparison.Ordinal)),
         "GM 缺少原版改造体资料。 ");
+}
+
+void GameKnowledgeFingerprintAndVisibilityFlow()
+{
+    var gameRoot = Path.Combine(root, "knowledge-game");
+    var dataRoot = Path.Combine(gameRoot, "Probably Stolen_Data");
+    Directory.CreateDirectory(dataRoot);
+    var assembly = Path.Combine(gameRoot, "GameAssembly.dll");
+    File.WriteAllText(assembly, "game-content-a");
+    var first = GameSourceFingerprint.Capture(gameRoot);
+    File.SetLastWriteTimeUtc(assembly, DateTime.UtcNow.AddMinutes(-2));
+    var sameContent = GameSourceFingerprint.Capture(gameRoot, first);
+    Assert(first.Fingerprint == sameContent.Fingerprint,
+        "资源时间变化但内容相同时不应触发重扫。 ");
+    File.WriteAllText(assembly, "game-content-b");
+    var changed = GameSourceFingerprint.Capture(gameRoot, sameContent);
+    Assert(first.Fingerprint != changed.Fingerprint,
+        "原版资源内容改变后未触发新指纹。 ");
+
+    changed.Items.Add(new GameKnowledgeItem
+    {
+        Key = "water", Name = "瓶装水", Description = "可饮用的水",
+        BaseValue = 10, ObservedByPlayer = true
+    });
+    changed.Items.Add(new GameKnowledgeItem
+    {
+        Key = "secret", Name = "秘密机械", Description = "尚未发现的剧情物品",
+        BaseValue = 100, ObservedByPlayer = false
+    });
+    var context = new GameConversationContext();
+    GameKnowledgeSearch.Enrich(changed, context, "瓶装水和秘密机械有什么区别？");
+    Assert(
+           context.RelevantGameKnowledge.Any(x => x.Contains("瓶装水", StringComparison.Ordinal)) &&
+           !context.RelevantGameKnowledge.Any(x => x.Contains("秘密机械", StringComparison.Ordinal)) &&
+           context.GmKnowledge.Any(x => x.Contains("秘密机械", StringComparison.Ordinal)),
+        "目录检索未正确隔离玩家已见和未见的资料。 ");
+
+    var visibility = new GameConversationContext
+    {
+        Trade = new NativeTradeContext
+        {
+            Item = new NativeItemContext { ItemKey = "counter_item" },
+            ClientCarriedItems = new List<NativeItemContext>
+            {
+                new() { ItemKey = "hidden_bag_item" }
+            },
+            PlayerOfferedItems = new List<NativeItemContext>
+            {
+                new() { ItemKey = "player_counter_item" }
+            }
+        }
+    };
+    var visibleKeys = GameKnowledgeSearch.VisibleItems(visibility).Select(x => x.ItemKey).ToList();
+    Assert(visibleKeys.SequenceEqual(new[] { "counter_item", "player_counter_item" }),
+        "顾客未展示的随身物品不能自动标记为玩家已见。 ");
+    Assert(!GameKnowledgeSearch.CanRecordPerson(new NativeCharacterContext
+           { OriginalIdentifier = "unintroduced", IsIntroduced = false }) &&
+           GameKnowledgeSearch.CanRecordPerson(new NativeCharacterContext
+           { OriginalIdentifier = "introduced", IsIntroduced = true }),
+        "未介绍的人物身份不能进入可检索目录。 ");
 }
 
 void GmReviewRoutingFlow()

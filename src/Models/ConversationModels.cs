@@ -97,6 +97,8 @@ public sealed class GameConversationContext
     public List<string> ActiveWorldEvents { get; set; } = new();
     [JsonPropertyName("gm_knowledge")]
     public List<string> GmKnowledge { get; set; } = new();
+    [JsonPropertyName("relevant_game_knowledge")]
+    public List<string> RelevantGameKnowledge { get; set; } = new();
     [JsonPropertyName("third_party_tasks")]
     public List<string> ThirdPartyTasks { get; set; } = new();
     [JsonPropertyName("known_characters")]

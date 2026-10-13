@@ -23,7 +23,7 @@ public sealed class AIWorldPawnshopMod : MelonMod
     {
         Instance = this;
         var dataRoot = Path.Combine(Application.persistentDataPath, ModConstants.DataDirectoryName);
-        _runtime = new WorldRuntime(dataRoot);
+        _runtime = new WorldRuntime(dataRoot, Path.GetDirectoryName(Application.dataPath));
         _ui = new WorldUiController();
         _chatUi = new ChatUiController();
         _modelSettingsUi = new ModelSettingsUiController();
@@ -44,6 +44,7 @@ public sealed class AIWorldPawnshopMod : MelonMod
             return;
 
         NativeDialogEntry.Update();
+        _runtime.TickGameKnowledge();
         NativeBarterAdapter.Update();
         _modelSettingsUi?.Update(_runtime);
         _ui?.Update(_runtime);

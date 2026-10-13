@@ -134,6 +134,7 @@ public sealed class ChatUiController
             _scene,
             _characterKey,
             _characterName);
+        runtime.EnrichConversationContext(gameContext, playerText);
         runtime.LogPerformance(
             $"stage=context_build elapsed_ms={ElapsedMilliseconds(contextStarted)}");
         var contextCharacter = gameContext.Character;

@@ -95,6 +95,7 @@ public sealed class OpenAiCompatibleProvider : IModelProvider
             ActiveWorldEvents = source.ActiveWorldEvents,
             ThirdPartyTasks = source.ThirdPartyTasks,
             KnownCharacters = source.KnownCharacters,
+            RelevantGameKnowledge = source.RelevantGameKnowledge,
             GmKnowledge = new List<string>()
         };
         return new ConversationRequest
@@ -470,6 +471,7 @@ public sealed class OpenAiCompatibleProvider : IModelProvider
                     trade = includeTrade ? context.Trade : null,
                     original_story_facts = context.OriginalStoryFacts,
                     original_dialogue_context = context.OriginalDialogueContext,
+                    relevant_game_knowledge = context.RelevantGameKnowledge,
                     relationship = context.Relationship,
                     procurement = includeProcurement ? context.Procurement : null,
                     active_world_events = includeWorld ? context.ActiveWorldEvents : null,
@@ -508,6 +510,7 @@ public sealed class OpenAiCompatibleProvider : IModelProvider
                 },
                 original_story_facts = context.OriginalStoryFacts,
                 original_dialogue_context = context.OriginalDialogueContext,
+                relevant_game_knowledge = context.RelevantGameKnowledge,
                 relationship = context.Relationship,
                 active_world_events = context.ActiveWorldEvents
             }

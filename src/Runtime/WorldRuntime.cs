@@ -22,6 +22,7 @@ public sealed class WorldRuntime
     private readonly string _worldId;
     private readonly EchoWeaveRuntime _echoWeave;
     private readonly ExistingAdapterCapabilities _capabilityAdapters;
+    private readonly GameKnowledgeCatalog? _gameKnowledge;
     private readonly ConcurrentDictionary<string, EchoWeaveSnapshot> _turnSnapshots =
         new(StringComparer.OrdinalIgnoreCase);
 
@@ -31,10 +32,12 @@ public sealed class WorldRuntime
     // Public name for the current orchestration layer; EchoWeave remains as a save-format compatibility alias.
     public EchoWeaveRuntime Gm => _echoWeave;
 
-    public WorldRuntime(string dataRoot)
+    public WorldRuntime(string dataRoot, string? gameDirectory = null)
     {
         _dataRoot = dataRoot;
         _store = new JsonFileStore(dataRoot);
+        if (!string.IsNullOrWhiteSpace(gameDirectory))
+            _gameKnowledge = new GameKnowledgeCatalog(dataRoot, gameDirectory);
         Config = _store.LoadConfig();
         _fallback = new LocalFallbackEngine(_store.LoadLocalContent());
         _httpClient = new HttpClient
@@ -170,7 +173,20 @@ public sealed class WorldRuntime
         string scene,
         string characterKey,
         string characterName) =>
-        NativeConversationContextBuilder.Build(scene, characterKey, characterName, State);
+        BuildAndObserveConversationContext(scene, characterKey, characterName);
+
+    private GameConversationContext BuildAndObserveConversationContext(
+        string scene, string characterKey, string characterName)
+    {
+        var context = NativeConversationContextBuilder.Build(scene, characterKey, characterName, State);
+        _gameKnowledge?.Observe(context, State.CurrentDay);
+        return context;
+    }
+
+    public void EnrichConversationContext(GameConversationContext context, string playerText) =>
+        _gameKnowledge?.Enrich(context, playerText);
+
+    public void TickGameKnowledge() => _gameKnowledge?.Tick();
 
     public async Task<ModelConnectionResult> TestConnectionAsync(
         ModelProfile profile,
@@ -839,6 +855,7 @@ public sealed class WorldRuntime
 
     public void Save()
     {
+        _gameKnowledge?.Save();
         _store.SaveConfig(Config);
         _store.SaveWorld(State);
         _echoWeave.Save();
