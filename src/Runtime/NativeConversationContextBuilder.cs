@@ -33,10 +33,12 @@ internal static class NativeConversationContextBuilder
                     explicitClient,
                     explicitInstance);
 
+            OriginalWorldLoreCatalog.AddPublicKnowledge(context.OriginalCharacterProfile);
             AddRelationshipContext(context, characterKey, world);
             AddProcurementContext(context, characterKey, world);
             AddWorldEvents(context, world);
             context.GmKnowledge = GmKnowledgeCatalog.Build(world);
+            OriginalWorldLoreCatalog.AddGmKnowledge(context.GmKnowledge);
             context.KnownCharacters = world.Characters.Values
                 .Where(x => !string.IsNullOrWhiteSpace(x.CharacterKey) &&
                             !x.CharacterKey.Equals(characterKey, StringComparison.OrdinalIgnoreCase))
@@ -234,10 +236,10 @@ internal static class NativeConversationContextBuilder
                 $"原版身份：通缉对象；是否已被玩家举报：{client.reported}；悬赏：{client.reportReward}");
         }
 
-        if (client.isAug)
+        if (client.isAug && client.isAugScanned)
         {
             context.OriginalStoryFacts.Add(
-                $"原版身份：增强人，等级 {client.augTier}；玩家是否已完成扫描：{client.isAugScanned}");
+                $"原版身份：改造体，等级 {client.augTier}；玩家已完成扫描");
         }
 
         if (client.isSecurity ||
@@ -381,8 +383,8 @@ internal static class NativeConversationContextBuilder
         if (!string.IsNullOrWhiteSpace(character.FactionKey))
         {
             var faction = FirstNotBlank(character.FactionDisplayName, character.FactionKey);
-            profile.RoleAndBackground.Add($"所属原版阵营：{faction}");
-            profile.ImmutableConstraints.Add($"不得声称属于 {faction} 之外的阵营。");
+            profile.RoleAndBackground.Add($"原版顾客分类：{faction}；不自动等于组织成员身份。");
+            profile.ImmutableConstraints.Add("不得仅凭顾客分类自称某组织成员，或冒用其他阵营的权限。");
         }
 
         AddGeneralRoleFacts(profile, client);
@@ -393,11 +395,13 @@ internal static class NativeConversationContextBuilder
             profile.SpeechStyleSamples.Add(line);
 
         profile.KnowledgeBoundaries.Add(
-            "只知道当前人物亲历的原版剧情、交易、关系记忆，以及在场可见物品和已公开的世界事件。");
+            "只知道当前人物亲历的原版剧情、交易、关系记忆，以及在场可见物品、公开背景和已公开的世界事件。");
         profile.KnowledgeBoundaries.Add(
             "不得把其他顾客、电话联系人或全局对话记录当成自己的经历。");
         profile.KnowledgeBoundaries.Add(
             "未在档案、当前台词或摘要记忆中出现的身世细节，应保持含糊而不是编造。");
+        if (client.isAug && !client.isAugScanned)
+            profile.KnowledgeBoundaries.Add("真实身份尚未被玩家确认；不要主动揭露改造体身份或复述导师笔记。只能按当前人物原版台词及已发生的情节回应。");
     }
 
     private static void PopulatePhoneCharacterProfile(GameConversationContext context)
@@ -412,7 +416,7 @@ internal static class NativeConversationContextBuilder
             $"只能以电话联系人 {character.DisplayName} 的身份回复，不得借用店内顾客的姓名、库存或来意。");
         foreach (var line in context.OriginalDialogueContext.Take(MaxDialogueFacts))
             profile.SpeechStyleSamples.Add(line);
-        profile.KnowledgeBoundaries.Add("电话联系人只能处理自己的原版服务与当前通话内容。");
+        profile.KnowledgeBoundaries.Add("电话联系人可以谈公开背景，但只能叙述自己的原版服务、经历与当前通话内容。");
     }
 
     private static void AddGeneralRoleFacts(
@@ -423,8 +427,8 @@ internal static class NativeConversationContextBuilder
             profile.RoleAndBackground.Add("原版职业身份：治安或安保人员。");
         if (client.isWanted)
             profile.RoleAndBackground.Add("原版身份状态：通缉对象。");
-        if (client.isAug)
-            profile.RoleAndBackground.Add($"原版身体状态：{client.augTier} 级增强人。");
+        if (client.isAug && client.isAugScanned)
+            profile.RoleAndBackground.Add($"原版身体状态：{client.augTier} 级改造体，玩家已完成扫描。");
         if (client.IsClientAddict)
             profile.RoleAndBackground.Add("原版人物状态：存在成瘾相关设定。");
         if (client.IsPersonalConsumption)

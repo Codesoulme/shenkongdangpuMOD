@@ -132,6 +132,10 @@ public sealed class OriginalCharacterProfileContext
 {
     [JsonPropertyName("canonical_identity")]
     public string CanonicalIdentity { get; set; } = string.Empty;
+    [JsonPropertyName("world_background")]
+    public List<string> WorldBackground { get; set; } = new();
+    [JsonPropertyName("faction_background")]
+    public List<string> FactionBackground { get; set; } = new();
     [JsonPropertyName("role_and_background")]
     public List<string> RoleAndBackground { get; set; } = new();
     [JsonPropertyName("current_story_state")]

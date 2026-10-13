@@ -31,6 +31,7 @@ try
     ModelUsesSparseConversationContractFlow();
     ModelCasualTurnUsesCompactRequestFlow();
     ModelDetailedTurnUsesScopedInstructionsFlow();
+    OriginalWorldLoreFlow();
     GmReviewRoutingFlow();
     ThirdPartyTaskCanonicalizationFlow();
     ThirdPartyCapabilityMappingFlow();
@@ -673,6 +674,7 @@ void ModelCasualTurnUsesCompactRequestFlow()
         PlayerText = "今天天气怎么样？",
         GameContext = new GameConversationContext
         {
+            OriginalCharacterProfile = CreateLoreProfile(),
             GmKnowledge = new List<string> { "GM_ONLY_MARKER" },
             KnownCharacters = new List<KnownCharacterContext>
             {
@@ -700,6 +702,8 @@ void ModelCasualTurnUsesCompactRequestFlow()
            !payload.Contains("LARGE_DIRECTORY_MARKER", StringComparison.Ordinal) &&
            !payload.Contains("LARGE_PROCUREMENT_MARKER", StringComparison.Ordinal) &&
            !payload.Contains("GM_ONLY_MARKER", StringComparison.Ordinal) &&
+           payload.Contains("world_background", StringComparison.Ordinal) &&
+           payload.Contains("faction_background", StringComparison.Ordinal) &&
            maxTokens <= 220,
         "普通闲聊没有使用精简提示、上下文和输出预算。 ");
 }
@@ -724,6 +728,7 @@ void ModelDetailedTurnUsesScopedInstructionsFlow()
                 PlayerText = "我用报纸换你的小瓶装水，你再补五信用点，行吗？",
                 GameContext = new GameConversationContext
                 {
+                    OriginalCharacterProfile = CreateLoreProfile(),
                     Procurement = new ProcurementConversationContext
                     {
                         RarityBasis = "IRRELEVANT_PROCUREMENT_MARKER"
@@ -754,8 +759,34 @@ void ModelDetailedTurnUsesScopedInstructionsFlow()
            !prompt.Contains("未来找货规则", StringComparison.Ordinal) &&
            !payload.Contains("IRRELEVANT_PROCUREMENT_MARKER", StringComparison.Ordinal) &&
            !payload.Contains("IRRELEVANT_DIRECTORY_MARKER", StringComparison.Ordinal) &&
+           payload.Contains("world_background", StringComparison.Ordinal) &&
+           payload.Contains("faction_background", StringComparison.Ordinal) &&
            maxTokens <= 360,
         "明确行为轮次仍携带无关能力说明或过高输出预算。 ");
+}
+
+OriginalCharacterProfileContext CreateLoreProfile()
+{
+    var profile = new OriginalCharacterProfileContext();
+    OriginalWorldLoreCatalog.AddPublicKnowledge(profile);
+    return profile;
+}
+
+void OriginalWorldLoreFlow()
+{
+    var profile = CreateLoreProfile();
+    Assert(profile.WorldBackground.Count == 4 && profile.FactionBackground.Count == 6,
+        "原版公开世界与群体资料未进入人物档案。 ");
+    Assert(profile.FactionBackground.Any(x => x.Contains("顾客来源分类", StringComparison.Ordinal)) &&
+           profile.FactionBackground.Any(x => x.Contains("革命军", StringComparison.Ordinal)) &&
+           profile.KnowledgeBoundaries.Any(x => x.Contains("不代表你亲历", StringComparison.Ordinal)),
+        "群体分类或人物知识边界缺失。 ");
+    Assert(!JsonSerializer.Serialize(profile).Contains("脑部植入物", StringComparison.Ordinal),
+        "剧情敏感资料泄露到普通人物背景。 ");
+    var gmKnowledge = new List<string>();
+    OriginalWorldLoreCatalog.AddGmKnowledge(gmKnowledge);
+    Assert(gmKnowledge.Any(x => x.Contains("脑部植入物", StringComparison.Ordinal)),
+        "GM 缺少原版改造体资料。 ");
 }
 
 void GmReviewRoutingFlow()
