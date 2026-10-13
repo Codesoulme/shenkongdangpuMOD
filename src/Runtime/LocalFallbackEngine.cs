@@ -88,6 +88,13 @@ public sealed class LocalFallbackEngine
                     RequiredPlayerItemName = valid ? required!.DisplayName : string.Empty,
                     RequiredPlayerItemKeys = valid ? new List<string> { required!.ItemKey } : new List<string>(),
                     RequiredPlayerItemNames = valid ? new List<string> { required!.DisplayName } : new List<string>(),
+                    ValueAssessment = new BarterValueAssessment
+                    {
+                        Decision = valid ? "accept" : "reject",
+                        Reason = valid
+                            ? "本地降级规则将由成交前原版价值校验继续复核"
+                            : "交换双方物品不明确"
+                    },
                     Reason = valid ? "本地降级规则识别到双方真实物品" : "交换双方物品不明确"
                 }
             };

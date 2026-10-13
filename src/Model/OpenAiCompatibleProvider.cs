@@ -132,6 +132,7 @@ public sealed class OpenAiCompatibleProvider : IModelProvider
                 .Concat(new[]
                 {
                     $"人物候选回复：{candidateResponse.NpcReply}",
+                    $"人物候选交换提案：explicit={candidateResponse.BarterProposal.Explicit}, accepted={candidateResponse.BarterProposal.Accepted}, client_runtime={candidateResponse.BarterProposal.ClientItemRuntimeKey}, player_runtimes={string.Join(",", candidateResponse.BarterProposal.RequiredPlayerItemRuntimeKeys)}, value_decision={candidateResponse.BarterProposal.ValueAssessment.Decision}, value_reason={candidateResponse.BarterProposal.ValueAssessment.Reason}",
                     $"人物候选转账提案：explicit={candidateResponse.WalletTransfer.Explicit}, accepted={candidateResponse.WalletTransfer.Accepted}, amount={candidateResponse.WalletTransfer.Amount}, source={candidateResponse.WalletTransfer.Source}",
                     $"人物候选第三方联系：explicit={candidateResponse.ThirdPartyTask.Explicit}, accepted={candidateResponse.ThirdPartyTask.Accepted}, target_key={candidateResponse.ThirdPartyTask.TargetCharacterKey}, target_name={candidateResponse.ThirdPartyTask.TargetDisplayName}, purpose={candidateResponse.ThirdPartyTask.Purpose}, due_in_days={candidateResponse.ThirdPartyTask.DueInDays}, decision={candidateResponse.ThirdPartyTask.Decision}"
                 })
@@ -451,6 +452,8 @@ public sealed class OpenAiCompatibleProvider : IModelProvider
                 "保险", "新闻", "供应", "供给", "需求", "市场", "缺货", "涨价", "降价",
                 "事件", "治安", "物价", "安全", "保护", "环境", "情况", "生意", "客流",
                 "库存", "长期", "永久", "附近", "店门", "城市", "街区");
+            var includeBarter = ContainsAny(text,
+                "交换", "换", "以物易物", "拿这个换", "用这个换", "barter", "swap", "exchange");
 
             return JsonSerializer.Serialize(new
             {
@@ -468,7 +471,11 @@ public sealed class OpenAiCompatibleProvider : IModelProvider
                     authority = context.Authority,
                     character = context.Character,
                     original_character_profile = context.OriginalCharacterProfile,
-                    trade = includeTrade ? context.Trade : null,
+                    trade = includeTrade
+                        ? includeBarter
+                            ? BuildBarterTradePayload(trade)
+                            : context.Trade
+                        : null,
                     original_story_facts = context.OriginalStoryFacts,
                     original_dialogue_context = context.OriginalDialogueContext,
                     relevant_game_knowledge = context.RelevantGameKnowledge,
@@ -515,6 +522,55 @@ public sealed class OpenAiCompatibleProvider : IModelProvider
                 active_world_events = context.ActiveWorldEvents
             }
         });
+    }
+
+    private static object BuildBarterTradePayload(NativeTradeContext trade)
+    {
+        return new
+        {
+            available = trade.Available,
+            phase = trade.Phase,
+            direction = trade.Direction,
+            client_cash = trade.ClientCash,
+            client_budget = trade.ClientBudget,
+            client_buy_price_modifier = trade.ClientBuyPriceModifier,
+            client_sell_price_modifier = trade.ClientSellPriceModifier,
+            client_impatience = trade.ClientImpatience,
+            item = trade.Item,
+            client_inventory_count = trade.ClientInventoryCount,
+            client_inventory_truncated = trade.ClientInventoryTruncated,
+            client_carried_items = trade.ClientCarriedItems
+                .Select(BuildBarterItemPayload)
+                .ToList(),
+            player_offered_items = trade.PlayerOfferedItems
+                .Select(BuildBarterItemPayload)
+                .ToList(),
+            final_offer_value = trade.FinalOfferValue,
+            client_wants_item = trade.ClientWantsItem,
+            client_refuses_item = trade.ClientRefusesItem,
+            client_has_budget = trade.ClientHasBudget,
+            client_can_inspect_item = trade.ClientCanInspectItem
+        };
+    }
+
+    private static object BuildBarterItemPayload(NativeItemContext item)
+    {
+        return new
+        {
+            runtime_key = item.RuntimeKey,
+            item_key = item.ItemKey,
+            identifier = item.Identifier,
+            internal_name = item.InternalName,
+            display_name = item.DisplayName,
+            owner = item.Owner,
+            quantity = item.Quantity,
+            base_value = item.BaseValue,
+            current_value = item.CurrentValue,
+            negotiated_value = item.NegotiatedValue,
+            condition_identifier = item.ConditionIdentifier,
+            item_types = item.ItemTypes,
+            description = item.Description
+        };
     }
 
     private static object BuildProbeBody(ModelProfile profile, string protocol)
@@ -1177,6 +1233,18 @@ public sealed class OpenAiCompatibleProvider : IModelProvider
         proposal.RequiredPlayerItemName = ReadString(value, "required_player_item_name") ?? string.Empty;
         proposal.RequiredPlayerItemKeys = ReadStringArray(value, "required_player_item_keys");
         proposal.RequiredPlayerItemNames = ReadStringArray(value, "required_player_item_names");
+        if (TryGetProperty(value, "value_assessment", out var assessment) &&
+            assessment.ValueKind == JsonValueKind.Object)
+        {
+            proposal.ValueAssessment.Decision =
+                ReadString(assessment, "decision") ?? "unknown";
+            proposal.ValueAssessment.Reason =
+                ReadString(assessment, "reason") ?? string.Empty;
+            proposal.ValueAssessment.ClientTotalValue =
+                ReadLong(assessment, "client_total_value");
+            proposal.ValueAssessment.PlayerTotalValue =
+                ReadLong(assessment, "player_total_value");
+        }
         proposal.Reason = ReadString(value, "reason") ?? string.Empty;
         return proposal;
     }
@@ -1319,7 +1387,7 @@ public sealed class OpenAiCompatibleProvider : IModelProvider
         return false;
     }
 
-    private const string GmSystemPrompt = @"你是 GM 监督 AI，不扮演人物。只分析当前玩家输入、原版上下文、人物候选回复、人物候选结构化提案和 gm_knowledge，先识别目标，再按目标路径优先级选择当前状态满足条件的已有接口；直接路径不可用时选择备用路径。只能返回 JSON；npc_reply 固定填写 GM，world_modifications 只填写已确认可执行且可验证的计划，并填写 goal、path。若人物候选转账提案 explicit=true，你必须复核人物候选回复是否明确答应从当前顾客 client_budget 补付该具体金额：合理且可验证时输出同金额的 wallet_transfer 且 accepted=true，不合理或接口前置条件不满足时输出 wallet_transfer explicit=true、accepted=false；若没有候选转账提案且对话没有明确承诺，不得自行创造转账。source 固定为 client_budget。若人物候选第三方联系 explicit=true，只能在当前人物明确答应、目标人物能从已有人物目录唯一解析且能力目录含 visit.request.third_party 时保留完全相同的目标、目的、期限；条件不满足时返回同一 third_party_task 且 accepted=false，不得换成另一个人物。人物候选没有第三方提案时不得自行创建。目标人物本人处理状态为 arrived 的任务时，decision 才能填写 accept 或 reject。找不到合理落点时保持 world_modifications 为空。不得创造接口、字段、物品或机制。\n物品归属复核：trade.item.owner、client_carried_items 中的 owner 和 player_offered_items 中的 owner 是原版归属结论。owner=client 或界面“未拥有”表示顾客带来的物品，即使物品在玩家侧柜台、正在议价或 GetCountersItems() 返回了它，也不能当成玩家物品；只有 owner=player 的真实玩家侧物品才可作为玩家交换物。owner=unknown 时拒绝猜测并让相关提案保持未接受。identifier、internal_name、display_name、tags、condition_identifier 仅用于区分物品，不能推翻 owner。\n";
+    private const string GmSystemPrompt = @"你是 GM 监督 AI，不扮演人物。只分析当前玩家输入、原版上下文、人物候选回复、人物候选结构化提案和 gm_knowledge，先识别目标，再按目标路径优先级选择当前状态满足条件的已有接口；直接路径不可用时选择备用路径。只能返回 JSON；npc_reply 固定填写 GM，world_modifications 只填写已确认可执行且可验证的计划，并填写 goal、path。若人物候选转账提案 explicit=true，你必须复核人物候选回复是否明确答应从当前顾客 client_budget 补付该具体金额：合理且可验证时输出同金额的 wallet_transfer 且 accepted=true，不合理或接口前置条件不满足时输出 wallet_transfer explicit=true、accepted=false；若没有候选转账提案且对话没有明确承诺，不得自行创造转账。source 固定为 client_budget。若人物候选交换提案 explicit=true，你必须复核双方物品的 owner、运行时编号、数量和当前可用价值，并在 barter_proposal.value_assessment 中给出 accept、reject、adjust 或 unknown。顾客给出的物品总价值和补付款必须与玩家给出的物品总价值进行比较；价值缺失、物品不能唯一确认或明显失衡时不得 accepted=true。只有人物候选和 GM 都确认合理且接口前置条件满足时才保留 barter_proposal.accepted=true；不得因为人物候选已经答应就照单全收。若人物候选第三方联系 explicit=true，只能在当前人物明确答应、目标人物能从已有人物目录唯一解析且能力目录含 visit.request.third_party 时保留完全相同的目标、目的、期限；条件不满足时返回同一 third_party_task 且 accepted=false，不得换成另一个人物。人物候选没有第三方提案时不得自行创建。目标人物本人处理状态为 arrived 的任务时，decision 才能填写 accept 或 reject。找不到合理落点时保持 world_modifications 为空。不得创造接口、字段、物品或机制。\n物品归属复核：trade.item.owner、client_carried_items 中的 owner 和 player_offered_items 中的 owner 是原版归属结论。owner=client 或界面“未拥有”表示顾客带来的物品，即使物品在玩家侧柜台、正在议价或 GetCountersItems() 返回了它，也不能当成玩家物品；只有 owner=player 的真实玩家侧物品才可作为玩家交换物。owner=unknown 时拒绝猜测并让相关提案保持未接受。identifier、internal_name、display_name、tags、condition_identifier 仅用于区分物品，不能推翻 owner。value_assessment 中的金额只是说明，最终成交前由 Mod 使用原版物品数据再次核验。\n";
 
     private const string CompactConversationSystemPrompt = @"快速人物回复：扮演《深空当铺》当前原版人物。以 game_context 的人物身份、原版档案、剧情事实、当前物品、关系记忆和近期对话为准；不得改名、换身份、虚构经历、秘密、物品或已生效的世界变化。自然回应玩家，通常一至三句，保持人物语气。若对话明显结束或已连续偏题，可令 conversation_mode 为 return_to_task，否则为 continue。只返回 JSON，不要 Markdown。始终返回 npc_reply；可按需返回 conversation_mode、topic、mood、signals、memory_candidates。只有当人物在 npc_reply 中明确答应造成对话之外的持续状态变化、而且没有对应标准行为提案时，返回 gm_review=true；询问、闲聊和拒绝时省略。signals 仅写有把握的变化，值为 -2 到 2；memory_candidates 只记录玩家本轮值得长期记住的行为。普通闲聊不要返回交易、转账、找货、回访、交换、第三方任务或世界修改字段；未发生的行为字段必须省略。";
 
@@ -1339,7 +1407,7 @@ public sealed class OpenAiCompatibleProvider : IModelProvider
     private const string CarriedInventoryInstructionBlock = @"随身物品规则：玩家要求查看顾客本次携带的其他货物时才使用 carried_inventory_proposal；只有人物同意且 client_carried_items 中确有 owner=client 的物品时 accepted=true。
 ";
 
-    private const string BarterInstructionBlock = @"混合交换规则：明确以物换物才返回 barter_proposal。client_item_runtime_key 必须来自 owner=client；required_player_item_runtime_key 或 runtime_keys 必须来自 owner=player，并优先用运行时编号唯一定位。不得用顾客物品充当玩家物品，不得虚构。若同一提议还包含补付，另按补付规则返回 wallet_transfer，两个提案都只描述约定条件，等待原版确认后一起结算。
+    private const string BarterInstructionBlock = @"混合交换规则：明确以物换物才返回 barter_proposal。client_item_runtime_key 必须来自 owner=client；required_player_item_runtime_key 或 runtime_keys 必须来自 owner=player，并优先用运行时编号唯一定位。不得用顾客物品充当玩家物品，不得虚构。必须读取 trade.client_carried_items 和 trade.player_offered_items 中的 base_value、current_value、negotiated_value、quantity，比较顾客给出的一侧（包括补付款）与玩家给出的一侧。value_assessment.decision 只能为 accept、reject、adjust 或 unknown，并填写简短理由；价值缺失、归属不明或明显失衡时不得 accepted=true，应拒绝或要求调整。模型填写的金额只是判断依据，Mod 会在成交前再次用原版数据校验。若同一提议还包含补付，另按补付规则返回 wallet_transfer，两个提案都只描述约定条件，等待原版确认后一起结算。
 ";
 
     private const string WalletInstructionBlock = @"补付规则：wallet_transfer 只用于人物明确承诺从当前顾客 client_budget 另付给玩家的整数金额；npc_reply 明确答应后 accepted 才能为 true，source 固定为 client_budget。普通价格、找零、玩家付款不能误报成补付。
@@ -1354,7 +1422,7 @@ public sealed class OpenAiCompatibleProvider : IModelProvider
     private const string ExitInstructionBlock = @"离场规则：若人物在回复中明确要离店或结束电话，使用 conversation_mode=return_to_task；否则为 continue。不要让明确告别后还必须由玩家手动结束。
 ";
 
-    private const string SparseOutputInstructionBlock = @"只返回 JSON，不要 Markdown。始终返回 npc_reply；可按需返回 conversation_mode、topic、task_relevance、mood、signals、memory_candidates、gm_review。只有本轮确实出现对应意图时才返回 trade_proposal、wallet_transfer、procurement_proposal、return_visit_proposal、carried_inventory_proposal、barter_proposal、third_party_task；未发生的行为字段必须省略，解析器会补默认值。只有人物明确答应造成对话之外的持续状态变化、且没有标准行为提案承载时 gm_review=true；询问或拒绝时省略。signals 值为 -2 到 2；memory_candidates 只记录玩家值得长期记住的明确行为；world_modifications 省略。";
+    private const string SparseOutputInstructionBlock = @"只返回 JSON，不要 Markdown。始终返回 npc_reply；可按需返回 conversation_mode、topic、task_relevance、mood、signals、memory_candidates、gm_review。只有本轮确实出现对应意图时才返回 trade_proposal、wallet_transfer、procurement_proposal、return_visit_proposal、carried_inventory_proposal、barter_proposal、third_party_task；未发生的行为字段必须省略，解析器会补默认值。barter_proposal 出现时必须带 value_assessment；没有可靠价值依据时 decision=unknown 且 accepted=false。只有人物明确答应造成对话之外的持续状态变化、且没有标准行为提案承载时 gm_review=true；询问或拒绝时省略。signals 值为 -2 到 2；memory_candidates 只记录玩家值得长期记住的明确行为；world_modifications 省略。";
 
     private const string ThirdPartyTaskRules = "third_party_task 只用于玩家明确请当前人物联系另一个已知人物，且人物在 npc_reply 中明确答应；目标人物必须来自 known_characters、原版上下文或 GM 可见的人物目录，不得创造身份。提案必须使用目录中的稳定 key 和原显示名；无法唯一对应时自然拒绝或追问，accepted=false。third_party_tasks 中状态为 arrived 且当前人物就是目标时，人物可以独立选择 decision=accept 或 reject；传话人此前答应不等于目标同意。";
 

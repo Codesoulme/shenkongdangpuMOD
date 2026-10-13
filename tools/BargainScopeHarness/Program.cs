@@ -155,4 +155,94 @@ Assert(
     ConversationActionResolver.NaturalBarterFailureReply.Contains("交换", StringComparison.Ordinal),
     "已接受但无法执行的交换必须使用自然拒绝文本，不得暴露技术原因");
 
+var fairValueRequest = new ConversationRequest
+{
+    Scene = "store",
+    PlayerText = "交换这件物品",
+    GameContext = new GameConversationContext
+    {
+        Trade = new NativeTradeContext
+        {
+            ClientCarriedItems = new List<NativeItemContext>
+            {
+                new() { Owner = "client", RuntimeKey = 201, DisplayName = "顾客物品", CurrentValue = 10 }
+            },
+            PlayerOfferedItems = new List<NativeItemContext>
+            {
+                new() { Owner = "player", RuntimeKey = 202, DisplayName = "玩家物品", CurrentValue = 10 }
+            }
+        }
+    }
+};
+var fairValueResponse = new ConversationResponse
+{
+    NpcReply = "可以交换。",
+    BarterProposal = new BarterProposal
+    {
+        Explicit = true,
+        Accepted = true,
+        ClientItemRuntimeKey = 201,
+        RequiredPlayerItemRuntimeKey = 202,
+        ValueAssessment = new BarterValueAssessment
+        {
+            Decision = "accept",
+            Reason = "双方价值相当"
+        }
+    }
+};
+var fairValueCheck = BarterValuePolicy.Evaluate(fairValueRequest, fairValueResponse);
+Assert(fairValueCheck.Allowed, "价值相当的交换应允许进入原版流程");
+Assert(fairValueCheck.ClientTotalValue == 10,
+    "交换安全门应记录顾客一侧的原版价值");
+
+var mixedResponse = new ConversationResponse
+{
+    NpcReply = "可以交换，我再补5点。",
+    BarterProposal = new BarterProposal
+    {
+        Explicit = true,
+        Accepted = true,
+        ClientItemRuntimeKey = 201,
+        RequiredPlayerItemRuntimeKey = 202,
+        ValueAssessment = new BarterValueAssessment
+        {
+            Decision = "accept",
+            Reason = "顾客明确需要玩家物品"
+        }
+    },
+    WalletTransfer = new WalletTransferProposal
+    {
+        Explicit = true,
+        Accepted = true,
+        Amount = 5,
+        Source = "client_budget"
+    }
+};
+var mixedValueCheck = BarterValuePolicy.Evaluate(fairValueRequest, mixedResponse);
+Assert(mixedValueCheck.Allowed && mixedValueCheck.ClientTotalValue == 15,
+    "混合交换应把顾客补付款计入顾客给出的一侧");
+
+var unfairValueResponse = new ConversationResponse
+{
+    NpcReply = "可以交换。",
+    BarterProposal = new BarterProposal
+    {
+        Explicit = true,
+        Accepted = true,
+        ClientItemRuntimeKey = 201,
+        RequiredPlayerItemRuntimeKey = 202,
+        ValueAssessment = new BarterValueAssessment
+        {
+            Decision = "accept",
+            Reason = "顾客想要这件东西"
+        }
+    }
+};
+fairValueRequest.GameContext.Trade.ClientCarriedItems[0].CurrentValue = 100;
+var unfairValueCheck = BarterValuePolicy.Evaluate(fairValueRequest, unfairValueResponse);
+Assert(!unfairValueCheck.Allowed,
+    "明显低于顾客给出价值的交换必须在成交前拒绝");
+Assert(unfairValueCheck.Message.Contains("价值", StringComparison.Ordinal),
+    "价值不合理时应给出价值拒绝原因");
+
 Console.WriteLine("Bargain scope regression harness passed.");

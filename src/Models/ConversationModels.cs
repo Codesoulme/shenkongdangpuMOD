@@ -418,8 +418,22 @@ public sealed class BarterProposal
     public List<string> RequiredPlayerItemKeys { get; set; } = new();
     [JsonPropertyName("required_player_item_names")]
     public List<string> RequiredPlayerItemNames { get; set; } = new();
+    [JsonPropertyName("value_assessment")]
+    public BarterValueAssessment ValueAssessment { get; set; } = new();
     [JsonPropertyName("reason")]
     public string Reason { get; set; } = string.Empty;
+}
+
+public sealed class BarterValueAssessment
+{
+    [JsonPropertyName("decision")]
+    public string Decision { get; set; } = "unknown";
+    [JsonPropertyName("reason")]
+    public string Reason { get; set; } = string.Empty;
+    [JsonPropertyName("client_total_value")]
+    public long? ClientTotalValue { get; set; }
+    [JsonPropertyName("player_total_value")]
+    public long? PlayerTotalValue { get; set; }
 }
 
 public sealed class WalletTransferProposal

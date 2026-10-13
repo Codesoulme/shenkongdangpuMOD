@@ -26,6 +26,7 @@ internal static class ConversationActionResolver
         ResolveCarriedInventory(request, response);
         ResolveBarter(request, response);
         ResolveWalletTransfer(request, response);
+        ResolveBarterValue(request, response);
     }
 
     public static bool ShouldDismissStoreClient(ConversationRequest request, ConversationResponse response)
@@ -214,6 +215,31 @@ internal static class ConversationActionResolver
         }
         if (proposal.Explicit && string.IsNullOrWhiteSpace(proposal.Reason))
             proposal.Reason = proposal.Accepted ? "人物明确同意从预算补付信用点" : "人物没有明确同意补付信用点";
+    }
+
+    private static void ResolveBarterValue(
+        ConversationRequest request,
+        ConversationResponse response)
+    {
+        var proposal = response.BarterProposal;
+        if (!proposal.Explicit || !proposal.Accepted)
+            return;
+
+        var check = BarterValuePolicy.Evaluate(request, response);
+        if (!check.Allowed)
+        {
+            proposal.Accepted = false;
+            proposal.Reason = check.Message;
+            if (response.WalletTransfer.Explicit && response.WalletTransfer.Accepted)
+                response.WalletTransfer = new WalletTransferProposal();
+            response.NpcReply = "这笔交换的价值我接受不了，换个条件再谈。";
+            return;
+        }
+
+        proposal.ValueAssessment.ClientTotalValue = check.ClientTotalValue;
+        proposal.ValueAssessment.PlayerTotalValue = check.PlayerTotalValue;
+        if (string.IsNullOrWhiteSpace(proposal.ValueAssessment.Reason))
+            proposal.ValueAssessment.Reason = check.Message;
     }
 
     private static bool IsAcceptedReply(string value)

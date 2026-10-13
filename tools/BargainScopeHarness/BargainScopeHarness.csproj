@@ -37,6 +37,7 @@
     <Compile Include="..\..\src\Runtime\BargainScopeResolver.cs" Link="BargainScopeResolver.cs" />
     <Compile Include="..\..\src\Runtime\TradeProposalResolver.cs" Link="TradeProposalResolver.cs" />
     <Compile Include="..\..\src\Runtime\ConversationActionResolver.cs" Link="ConversationActionResolver.cs" />
+    <Compile Include="..\..\src\Runtime\BarterValuePolicy.cs" Link="BarterValuePolicy.cs" />
     <Compile Include="..\..\src\Models\ConversationModels.cs" Link="ConversationModels.cs" />
   </ItemGroup>
 </Project>

@@ -114,6 +114,30 @@ public sealed class WorldRuntime
                         // amount already extracted from the conversation.
                         if (gm.WalletTransfer.Explicit)
                             response.WalletTransfer = gm.WalletTransfer;
+                        if (response.BarterProposal.Explicit)
+                        {
+                            if (!gm.BarterProposal.Explicit || !gm.BarterProposal.Accepted)
+                            {
+                                response.BarterProposal.Accepted = false;
+                                response.BarterProposal.ValueAssessment =
+                                    gm.BarterProposal.ValueAssessment;
+                                response.BarterProposal.Reason = string.IsNullOrWhiteSpace(
+                                    gm.BarterProposal.Reason)
+                                    ? "GM 复核认为交换价值或前置条件不满足"
+                                    : gm.BarterProposal.Reason;
+                                if (response.WalletTransfer.Explicit &&
+                                    response.WalletTransfer.Accepted)
+                                {
+                                    response.WalletTransfer = new WalletTransferProposal();
+                                }
+                                response.NpcReply = ConversationActionResolver.NaturalBarterFailureReply;
+                            }
+                            else
+                            {
+                                response.BarterProposal.ValueAssessment =
+                                    gm.BarterProposal.ValueAssessment;
+                            }
+                        }
                         if (response.ThirdPartyTask.Explicit)
                         {
                             if (!gm.ThirdPartyTask.Explicit)
