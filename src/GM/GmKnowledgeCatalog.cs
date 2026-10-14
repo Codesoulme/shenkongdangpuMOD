@@ -13,6 +13,8 @@ public static class GmKnowledgeCatalog
         "已接能力：议价、找货委托、回访、随身货物、交换、顾客预算补付；这些能力有各自的原版事实校验。",
         "接口状态：" + string.Join("；", GmInterfaceCatalog.All.Select(x => $"{x.Key}={x.Status}{(x.CanModify ? ",可修改" : ",只读或未接入")}")),
         "目标路径：" + string.Join("；", GmInterfaceCatalog.GoalPaths.Select(x => $"{x.Goal}->{x.Path}(优先级{x.Priority},条件:{x.Requires},备用:{x.Fallback})")),
+        "当前可执行目标路径：" + string.Join("；", GmInterfaceCatalog.GoalPaths.Select(x =>
+            $"{x.Goal}=>{GmInterfaceCatalog.DescribeExecutableGoalPaths(x.Goal)}")),
         "可修改字段：GM 事件的 price_modifier、demand_modifier、supply_modifier；供给会进入找货成功率，价格和供需会在当前及后续原版来客生成时投影到 buyPriceModifier/sellPriceModifier；数值必须在 -0.50 到 0.50，duration_days=0 表示按对话语义永久生效，正数表示临时期限。",
         "不可修改：原版人物身份、物品表权重、任意库存数量、剧情变量、任意未知字段；金钱只能通过 wallet.transfer.native 从当前顾客已启用且余额足够的原版预算扣除并加入玩家现金；没有已验证接口的偷窃概率不能声称已改变。",
         "提案必须包含 target_key、field、operation(add/replace)、value、duration_days、title、summary、evidence、confidence；证据不足时拒绝。",

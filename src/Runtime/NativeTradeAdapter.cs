@@ -19,6 +19,19 @@ public sealed class NativeTradeApplication
 
 internal static class NativeTradeAdapter
 {
+    public static void RefreshCurrentUi()
+    {
+        try
+        {
+            PlayerStore.Instance?.RefreshCounterItem();
+            NegociationUIManager.Instance?.RefreshUI();
+        }
+        catch (Exception ex)
+        {
+            MelonLogger.Warning($"[当铺世界] 原版报价界面刷新失败：{ex.Message}");
+        }
+    }
+
     public static NativeTradeApplication Apply(
         ConversationRequest request,
         ConversationResponse response)

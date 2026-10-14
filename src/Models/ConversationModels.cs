@@ -103,6 +103,8 @@ public sealed class GameConversationContext
     public List<string> ThirdPartyTasks { get; set; } = new();
     [JsonPropertyName("known_characters")]
     public List<KnownCharacterContext> KnownCharacters { get; set; } = new();
+    [JsonPropertyName("recent_world_facts")]
+    public List<string> RecentWorldFacts { get; set; } = new();
 }
 
 public sealed class KnownCharacterContext

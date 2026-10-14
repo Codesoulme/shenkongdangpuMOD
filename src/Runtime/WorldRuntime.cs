@@ -273,6 +273,17 @@ public sealed class WorldRuntime
             var economy = NativeWorldEconomyAdapter.ApplyCurrentClient(State);
             if (economy.Applied && !economy.Verified)
                 _store.Log($"GM 经济修正未能写入当前原版来客：{economy.Message}");
+            if (economy.Applied && economy.Verified)
+                NativeTradeAdapter.RefreshCurrentUi();
+            RecordWorldFact(
+                request,
+                "world_modification",
+                gmResult.Message + " " + economy.Message,
+                response.WorldModifications.Any(x =>
+                    string.IsNullOrWhiteSpace(x.TargetKey) ||
+                    x.TargetKey.Equals("global", StringComparison.OrdinalIgnoreCase))
+                    ? "public"
+                    : "actor");
             _echoWeave.TryRecordWorldOutcome(
                 State.CurrentDay,
                 "world.modify",
@@ -307,7 +318,7 @@ public sealed class WorldRuntime
             {
                 Day = State.CurrentDay,
                 Kind = "native_wallet_transfer",
-                Summary = wallet.Message,
+                Summary = $"{request.CharacterDisplayName}：{wallet.Message}",
                 Visibility = "actor"
             });
             var walletSnapshot = _echoWeave.Capture(request, State);
@@ -682,6 +693,8 @@ public sealed class WorldRuntime
         }
         if (barter.Proposed)
             MelonLogger.Msg($"[当铺世界] 交换对话：{barter.Message}");
+        if (barter.Proposed)
+            RecordWorldFact(request, "native_barter", barter.Message, "actor");
         var carried = barter.Applied
             ? new CarriedInventoryApplication()
             : _capabilityAdapters.RevealCarriedInventory(State, request, response);
@@ -690,6 +703,8 @@ public sealed class WorldRuntime
             response.NpcReply = "抱歉，那件东西现在拿不出来，先别把它算进交易。";
         if (carried.Proposed)
             MelonLogger.Msg($"[当铺世界] 随身物对话：{carried.Message}");
+        if (carried.Proposed)
+            RecordWorldFact(request, "native_inventory", carried.Message, "actor");
         if (carried.Applied || barter.Applied)
         {
             State.TouchRevision();
@@ -725,7 +740,7 @@ public sealed class WorldRuntime
             Day = State.CurrentDay,
             Kind = "native_trade_proposal",
             Summary =
-                $"玩家通过交谈向 {request.CharacterKey} 提出 {result.Kind} {result.Percent}% 的议价，" +
+                $"玩家通过交谈向 {request.CharacterDisplayName}（{request.CharacterKey}）提出 {result.Kind} {result.Percent}% 的议价，" +
                 $"范围 {result.Scope}，" +
                 result.Message,
             Visibility = "actor"
@@ -1239,6 +1254,26 @@ public sealed class WorldRuntime
     {
         if (State.Facts.Count > 200)
             State.Facts.RemoveRange(0, State.Facts.Count - 200);
+    }
+
+    private void RecordWorldFact(
+        ConversationRequest request,
+        string kind,
+        string summary,
+        string visibility)
+    {
+        if (string.IsNullOrWhiteSpace(summary))
+            return;
+
+        var speaker = FirstNotBlank(request.CharacterDisplayName, request.CharacterKey, "人物");
+        State.Facts.Add(new FactRecord
+        {
+            Day = State.CurrentDay,
+            Kind = kind,
+            Summary = $"{speaker}：{summary.Trim()}",
+            Visibility = visibility
+        });
+        TrimFacts();
     }
 
     private static string FirstNotBlank(params string?[] values) =>

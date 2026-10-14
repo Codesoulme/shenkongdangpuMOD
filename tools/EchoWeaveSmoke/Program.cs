@@ -22,6 +22,7 @@ try
     DuplicateConversationReplayFlow();
     StateRevisionIsMonotonic();
     GmModificationFlow();
+    GmGoalPathSafetyFlow();
     DailyEventFlow();
     NamedCharacterPersistenceFlow();
     LocalFallbackConversationFlow();
@@ -398,6 +399,31 @@ void GmModificationFlow()
     Assert(state.ActiveModifications[0].DurationDays == 0 &&
            state.News.Last().Body.Contains("影响：price_modifier -0.1，永久", StringComparison.Ordinal),
         "永久 GM 修正的新闻没有标明永久期限。");
+}
+
+void GmGoalPathSafetyFlow()
+{
+    var state = new WorldState { CurrentDay = 1 };
+    var unsupported = new WorldModificationProposal
+    {
+        TargetKey = "global",
+        Field = "price_modifier",
+        Operation = "add",
+        Value = -0.1,
+        DurationDays = 1,
+        Title = "治安变化",
+        Summary = "测试未接通路径",
+        Evidence = "测试证据",
+        Confidence = 0.9,
+        Goal = "reduce_store_loss",
+        Path = "burglary_attempt_rate"
+    };
+    var rejected = GmModificationEngine.Apply(state, new[] { unsupported });
+    Assert(!rejected.Applied && state.ActiveModifications.Count == 0,
+        "未接通的目标路径不应伪装成可执行世界修正。");
+    Assert(GmInterfaceCatalog.FindExecutableGoalPaths("change_prices")
+               .Any(x => x.Path.Equals("price_modifier", StringComparison.OrdinalIgnoreCase)),
+        "已接通的价格目标路径没有出现在可执行目录。");
 }
 
 void DailyEventFlow()

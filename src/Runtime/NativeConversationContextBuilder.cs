@@ -73,6 +73,25 @@ internal static class NativeConversationContextBuilder
                     return $"{sourceName}请你处理联系请求：{x.Purpose}，状态 {x.Status}，期限第 {x.DueDay} 天";
                 })
                 .ToList();
+
+            // Feed back only public facts or facts that explicitly mention the
+            // current person. Private memories remain character-scoped; this
+            // is the small read-back seam that lets a later conversation react
+            // to a real native outcome without leaking another character's
+            // private dialogue.
+            var currentNames = new[]
+            {
+                context.Character.Key,
+                context.Character.DisplayName,
+                context.Character.OriginalIdentifier
+            }.Where(x => !string.IsNullOrWhiteSpace(x)).ToArray();
+            context.RecentWorldFacts = world.Facts
+                .Where(f => f.Visibility.Equals("public", StringComparison.OrdinalIgnoreCase) ||
+                            currentNames.Any(name => f.Summary.Contains(name, StringComparison.OrdinalIgnoreCase)))
+                .OrderByDescending(f => f.Day)
+                .Take(12)
+                .Select(f => $"第 {f.Day} 天：{f.Summary}")
+                .ToList();
         }
         catch (Exception ex)
         {

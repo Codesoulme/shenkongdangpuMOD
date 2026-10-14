@@ -482,6 +482,7 @@ public sealed class OpenAiCompatibleProvider : IModelProvider
                     relationship = context.Relationship,
                     procurement = includeProcurement ? context.Procurement : null,
                     active_world_events = includeWorld ? context.ActiveWorldEvents : null,
+                    recent_world_facts = context.RecentWorldFacts,
                     third_party_tasks = includeThirdParty ? context.ThirdPartyTasks : null,
                     known_characters = includeThirdParty ? context.KnownCharacters : null
                 }
@@ -520,6 +521,7 @@ public sealed class OpenAiCompatibleProvider : IModelProvider
                 relevant_game_knowledge = context.RelevantGameKnowledge,
                 relationship = context.Relationship,
                 active_world_events = context.ActiveWorldEvents
+                ,recent_world_facts = context.RecentWorldFacts
             }
         });
     }

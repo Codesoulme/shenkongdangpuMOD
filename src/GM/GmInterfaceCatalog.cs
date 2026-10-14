@@ -41,6 +41,34 @@ public static class GmInterfaceCatalog
     public static IReadOnlyList<GoalPath> FindGoalPaths(string goal) =>
         GoalPaths.Where(x => x.Goal.Equals(goal, StringComparison.OrdinalIgnoreCase))
             .OrderByDescending(x => x.Priority).ToList();
+
+    public static IReadOnlyList<GoalPath> FindExecutableGoalPaths(string goal) =>
+        FindGoalPaths(goal).Where(x => IsExecutablePath(x.Path)).ToList();
+
+    public static bool IsExecutablePath(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+            return false;
+
+        if (path.Equals("price_modifier", StringComparison.OrdinalIgnoreCase) ||
+            path.Equals("demand_modifier", StringComparison.OrdinalIgnoreCase) ||
+            path.Equals("supply_modifier", StringComparison.OrdinalIgnoreCase))
+        {
+            var descriptor = All.FirstOrDefault(x =>
+                x.Key.Equals("world.event.modifiers", StringComparison.OrdinalIgnoreCase));
+            return descriptor is { Status: "implemented", CanModify: true };
+        }
+
+        return All.Any(x => x.CanModify &&
+                            x.Status.Equals("implemented", StringComparison.OrdinalIgnoreCase) &&
+                            (x.Key.Equals(path, StringComparison.OrdinalIgnoreCase) ||
+                             x.Key.EndsWith("." + path, StringComparison.OrdinalIgnoreCase)));
+    }
+
+    public static string DescribeExecutableGoalPaths(string goal) =>
+        string.Join("；", FindExecutableGoalPaths(goal).Select(x =>
+            $"{x.Path}(优先级{x.Priority},条件:{x.Requires})"));
+
     public static IReadOnlyList<GmInterfaceDescriptor> All { get; } = new List<GmInterfaceDescriptor>
     {
         new() { Key = "capability.trade.adjust", Owner = "NativeTradeAdapter", Purpose = "调用原版议价修改当前报价", Status = "implemented", CanModify = true, ModificationBoundary = "仅当前交易、1%至50%", Executor = "trade.adjust.selected", Inputs = new() { "current item", "percent", "scope" }, Outputs = new() { "native accept/reject", "refreshed quote" }, Preconditions = new() { "store scene", "current trade item" }, Verification = "读取原版议价结果" },
