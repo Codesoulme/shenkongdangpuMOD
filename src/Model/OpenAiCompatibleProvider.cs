@@ -95,6 +95,7 @@ public sealed class OpenAiCompatibleProvider : IModelProvider
             ActiveWorldEvents = source.ActiveWorldEvents,
             ThirdPartyTasks = source.ThirdPartyTasks,
             KnownCharacters = source.KnownCharacters,
+            RecentWorldFacts = source.RecentWorldFacts,
             RelevantGameKnowledge = source.RelevantGameKnowledge,
             GmKnowledge = new List<string>()
         };
@@ -902,6 +903,9 @@ public sealed class OpenAiCompatibleProvider : IModelProvider
     {
         var detail = ExtractErrorDetail(responseBody);
         var prefix = $"{ProtocolLabel(protocol)} 返回 HTTP {statusCode}";
+        if (statusCode == 403 &&
+            detail.Contains("only allows Codex official clients", StringComparison.OrdinalIgnoreCase))
+            return prefix + "：当前账号只允许官方 Codex 客户端，游戏 Mod 不能使用此凭据调用模型；请改用中转服务提供的通用 API 密钥或允许第三方客户端的接口。";
         if (statusCode is 401 or 403)
             prefix += "（密钥未通过认证）";
         else if (statusCode == 404)

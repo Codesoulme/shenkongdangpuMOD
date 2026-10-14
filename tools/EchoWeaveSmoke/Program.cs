@@ -28,6 +28,7 @@ try
     LocalFallbackConversationFlow();
     ActionRefusalMustWinFlow();
     ModelProtocolCacheFlow();
+    CodexClientRestrictionFlow();
     ModelTransientFailureDoesNotDoubleWaitFlow();
     ModelUsesSparseConversationContractFlow();
     ModelCasualTurnUsesCompactRequestFlow();
@@ -642,6 +643,25 @@ void ModelProtocolCacheFlow()
         "已确定可用协议后仍重复尝试失败协议，无法保证自由聊天速度。");
 }
 
+void CodexClientRestrictionFlow()
+{
+    using var http = new HttpClient(new CodexRestrictionHandler());
+    var result = OpenAiCompatibleProvider.TestConnectionAsync(http, new ModelProfile
+    {
+        AllowNetwork = true,
+        BaseUrl = "http://mock.local/v1",
+        Model = "gpt-5.5",
+        Protocol = "auto",
+        TimeoutMs = 5000,
+        MaxOutputTokens = 500
+    }, CancellationToken.None).GetAwaiter().GetResult();
+
+    Assert(!result.Succeeded && result.StatusCode == 403 &&
+           result.Message.Contains("只允许官方 Codex 客户端", StringComparison.Ordinal) &&
+           !result.Message.Contains("密钥未通过认证", StringComparison.Ordinal),
+        "Codex 客户端限制没有被识别为明确的账号策略错误。");
+}
+
 void ModelTransientFailureDoesNotDoubleWaitFlow()
 {
     var handler = new TransientFailureHandler();
@@ -1141,6 +1161,22 @@ sealed class TransientFailureHandler : HttpMessageHandler
         {
             Content = new StringContent(
                 "{\"error\":{\"message\":\"temporary upstream failure\"}}",
+                Encoding.UTF8,
+                "application/json")
+        });
+    }
+}
+
+sealed class CodexRestrictionHandler : HttpMessageHandler
+{
+    protected override Task<HttpResponseMessage> SendAsync(
+        HttpRequestMessage request,
+        CancellationToken cancellationToken)
+    {
+        return Task.FromResult(new HttpResponseMessage(HttpStatusCode.Forbidden)
+        {
+            Content = new StringContent(
+                "{\"error\":{\"message\":\"This account only allows Codex official clients\",\"type\":\"forbidden_error\"}}",
                 Encoding.UTF8,
                 "application/json")
         });
