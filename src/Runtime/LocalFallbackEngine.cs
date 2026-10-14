@@ -302,7 +302,9 @@ public sealed class LocalFallbackEngine
 
     private static bool LooksLikeBarterRequest(ConversationRequest request) =>
         request.Scene.Equals("store", StringComparison.OrdinalIgnoreCase) &&
-        ContainsAny(request.PlayerText, "交换", "换你", "换这个", "换那个", "以物易物", "拿这个换", "用这个换");
+        (ContainsAny(request.PlayerText, "交换", "以物易物", "换你", "换这个", "换那个", "跟你换", "给你换") ||
+         (request.PlayerText.Contains("换", StringComparison.Ordinal) &&
+          ContainsAny(request.PlayerText, "拿", "用", "跟你", "给你")));
 
     /// <summary>
     /// Validates an item using only the immutable native snapshot captured on

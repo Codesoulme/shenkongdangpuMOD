@@ -25,8 +25,7 @@ internal static class ConversationActionResolver
         ResolveReturnVisit(request, response);
         ResolveCarriedInventory(request, response);
         if (response.BarterProposal.Explicit ||
-            ContainsAny(request.PlayerText ?? string.Empty,
-                "交换", "换你", "换这个", "换那个", "以物易物", "拿这个换", "用这个换"))
+            LooksLikeBarterIntent(request.PlayerText))
             ResolveBarter(request, response);
         ResolveWalletTransfer(request, response);
         ResolveBarterValue(request, response);
@@ -195,6 +194,15 @@ internal static class ConversationActionResolver
                b.Contains(a, StringComparison.OrdinalIgnoreCase);
     }
 
+    private static bool LooksLikeBarterIntent(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return false;
+        return ContainsAny(text, "交换", "以物易物", "换你", "换这个", "换那个", "跟你换", "给你换") ||
+               (text.Contains("换", StringComparison.Ordinal) &&
+                ContainsAny(text, "拿", "用", "跟你", "给你"));
+    }
+
     private static void ResolveBarter(ConversationRequest request, ConversationResponse response)
     {
         var proposal = response.BarterProposal;
@@ -203,8 +211,7 @@ internal static class ConversationActionResolver
 
         var playerText = request.PlayerText ?? string.Empty;
         var reply = response.NpcReply ?? string.Empty;
-        var barterIntent = proposal.Explicit ||
-                           ContainsAny(playerText, "交换", "换你", "换这个", "换那个", "以物易物", "拿这个换", "用这个换");
+        var barterIntent = proposal.Explicit || LooksLikeBarterIntent(playerText);
         if (!barterIntent)
             return;
         if (!proposal.Explicit)

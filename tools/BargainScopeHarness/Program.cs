@@ -411,4 +411,296 @@ Assert(!unfairValueCheck.Allowed,
 Assert(unfairValueCheck.Message.Contains("价值", StringComparison.Ordinal),
     "价值不合理时应给出价值拒绝原因");
 
+var replayEngine = new LocalFallbackEngine(LocalContent.CreateDefaults());
+var replayClientItem = new NativeItemContext
+{
+    RuntimeKey = 701,
+    ItemKey = "water_small",
+    Identifier = "water_small",
+    DisplayName = "小瓶装水",
+    Owner = "client",
+    CurrentValue = 10,
+    Quantity = 1
+};
+var replayPlayerItem = new NativeItemContext
+{
+    RuntimeKey = 702,
+    ItemKey = "paper",
+    Identifier = "paper",
+    DisplayName = "报纸",
+    Owner = "player",
+    CurrentValue = 10,
+    Quantity = 1
+};
+
+ConversationRequest ReplayRequest(
+    string text,
+    NativeTradeContext? trade = null,
+    bool namedCharacter = false,
+    string scene = "store") =>
+    new()
+    {
+        ConversationId = "replay",
+        TurnId = 1,
+        CharacterKey = "replay-client",
+        CharacterDisplayName = "回放顾客",
+        Scene = scene,
+        PlayerText = text,
+        GameContext = new GameConversationContext
+        {
+            Character = new NativeCharacterContext
+            {
+                Key = "replay-client",
+                OriginalIdentifier = namedCharacter ? "native-replay-client" : string.Empty,
+                DisplayName = "回放顾客",
+                Intent = "SELLNBUY"
+            },
+            Trade = trade ?? new NativeTradeContext()
+        }
+    };
+
+string ReplayActions(
+    ConversationRequest request,
+    ConversationResponse response,
+    bool normalize = true)
+{
+    if (normalize && !response.BarterProposal.Explicit)
+        ConversationActionResolver.Normalize(request, response);
+
+    var actions = new List<string>();
+    if (response.CarriedInventoryProposal.Explicit)
+    {
+        actions.Add(response.CarriedInventoryProposal.Accepted
+            ? $"RevealCarriedInventory(runtime={response.CarriedInventoryProposal.ItemRuntimeKey})"
+            : "RejectCarriedInventory");
+    }
+    if (response.BarterProposal.Explicit)
+    {
+        var valueCheck = BarterValuePolicy.Evaluate(request, response);
+        actions.Add(valueCheck.Allowed
+            ? "OpenNativeBarter(deferred-settlement)"
+            : $"RejectBarter({valueCheck.Message})");
+    }
+    if (response.ProcurementProposal.Explicit)
+        actions.Add(response.ProcurementProposal.Accepted
+            ? $"ScheduleProcurement({response.ProcurementProposal.Category})"
+            : "RejectProcurement");
+    if (response.ReturnVisitProposal.Explicit)
+        actions.Add(response.ReturnVisitProposal.Accepted
+            ? $"ScheduleReturnVisit(+{response.ReturnVisitProposal.DueInDays}d)"
+            : "RejectReturnVisit");
+    if (response.WalletTransfer.Explicit)
+        actions.Add(response.WalletTransfer.Accepted
+            ? $"QueueWalletTransfer({response.WalletTransfer.Amount})"
+            : "RejectWalletTransfer");
+    if (ConversationActionResolver.ShouldDismissStoreClient(request, response))
+    {
+        ConversationActionResolver.EnsureNaturalExitReply(request, response);
+        actions.Add("DismissCurrentClient(after-reply)");
+    }
+    if (ConversationActionResolver.ShouldHangUpPhone(request, response))
+    {
+        ConversationActionResolver.EnsureNaturalExitReply(request, response);
+        actions.Add("StopPhoneCall(after-reply)");
+    }
+    return actions.Count == 0 ? "NoNativeAction" : string.Join(" + ", actions);
+}
+
+void ReplayFallbackVariants(
+    string group,
+    IReadOnlyList<string> phrases,
+    Func<string, ConversationRequest> requestFactory,
+    Func<ConversationResponse, bool> expected)
+{
+    var actionSet = new HashSet<string>(StringComparer.Ordinal);
+    foreach (var phrase in phrases)
+    {
+        var request = requestFactory(phrase);
+        var response = replayEngine.Reply(request);
+        var actions = ReplayActions(request, response);
+        Console.WriteLine($"[REPLAY] {group} | 玩家：{phrase} | NPC：{response.NpcReply} | 后端：{actions}");
+        Assert(expected(response), $"{group} 未识别：{phrase}");
+        actionSet.Add(actions);
+    }
+    Assert(actionSet.Count == 1, $"{group} 的不同说法产生了不同后端动作：{string.Join(" / ", actionSet)}");
+}
+
+ReplayFallbackVariants(
+    "随身库存-有物品",
+    new[]
+    {
+        "你身上还有什么货？拿出来看看。",
+        "随身带了别的东西吗？我想看看。",
+        "除了这件，你还带的东西里有能卖的吗？"
+    },
+    phrase => ReplayRequest(
+        phrase,
+        new NativeTradeContext
+        {
+            ClientCarriedItems = new List<NativeItemContext> { replayClientItem }
+        }),
+    response => response.CarriedInventoryProposal.Accepted &&
+               response.CarriedInventoryProposal.ItemRuntimeKey == 701);
+
+var departureActions = new HashSet<string>(StringComparer.Ordinal);
+foreach (var phrase in new[] { "那我先走了。", "不买了，我离开。", "这次不谈了，下次再来。" })
+{
+    var request = ReplayRequest("结束这次交谈。");
+    var response = new ConversationResponse { NpcReply = phrase };
+    var actions = ReplayActions(request, response, normalize: false);
+    Console.WriteLine($"[REPLAY] 离店-明确告别 | 玩家：{request.PlayerText} | NPC：{response.NpcReply} | 后端：{actions}");
+    Assert(actions == "DismissCurrentClient(after-reply)", $"明确告别未触发离店：{phrase}");
+    Assert(response.NpcReply.Contains("先走", StringComparison.Ordinal) ||
+           response.NpcReply.Contains("下次", StringComparison.Ordinal) ||
+           response.NpcReply.Contains("回头", StringComparison.Ordinal),
+        $"明确离店回复没有自然结束语：{phrase}");
+    departureActions.Add(actions);
+}
+Assert(departureActions.Count == 1, "离店的不同说法没有落到同一个后端动作");
+
+ReplayFallbackVariants(
+    "回访",
+    new[] { "明天再来一趟吧。", "过几天回来看看。", "改天来店里聊。" },
+    phrase => ReplayRequest(phrase, namedCharacter: true),
+    response => response.ReturnVisitProposal.Accepted);
+
+ReplayFallbackVariants(
+    "未来找货",
+    new[] { "下次帮我找点医疗用品。", "以后带些药品过来。", "下次能不能替我弄到医疗物资？" },
+    phrase =>
+    {
+        var request = ReplayRequest(
+            phrase,
+            new NativeTradeContext
+            {
+                ClientCarriedItems = new List<NativeItemContext>()
+            });
+        request.GameContext.Procurement.CanRequestFutureGoods = true;
+        request.GameContext.Character.Key = "doctor-client";
+        request.GameContext.Character.OriginalIdentifier = "doctor-client";
+        return request;
+    },
+    response => response.ProcurementProposal.Explicit);
+
+var barterVariants = new[]
+{
+    "用这份报纸换你的小瓶装水。",
+    "我拿报纸跟你换小瓶装水。",
+    "以物易物，用报纸换水。"
+};
+var barterActions = new HashSet<string>(StringComparer.Ordinal);
+foreach (var phrase in barterVariants)
+{
+    var request = ReplayRequest(
+        phrase,
+        new NativeTradeContext
+        {
+            ClientCarriedItems = new List<NativeItemContext> { replayClientItem },
+            PlayerOfferedItems = new List<NativeItemContext> { replayPlayerItem }
+        });
+    var response = replayEngine.Reply(request);
+    var actions = ReplayActions(request, response, normalize: false);
+    Console.WriteLine($"[REPLAY] 交换-等值 | 玩家：{phrase} | NPC：{response.NpcReply} | 后端：{actions}");
+    Assert(response.BarterProposal.Accepted, $"交换口语未识别：{phrase}");
+    barterActions.Add(actions);
+}
+Assert(barterActions.Count == 1, "交换的不同说法没有落到同一个后端动作");
+
+var noCarriedRequest = ReplayRequest(
+    "你随身还有能卖的吗？拿出来看看。",
+    new NativeTradeContext());
+var noCarriedResponse = replayEngine.Reply(noCarriedRequest);
+var noCarriedActions = ReplayActions(noCarriedRequest, noCarriedResponse);
+Console.WriteLine($"[REPLAY] 随身库存-无物品 | 玩家：{noCarriedRequest.PlayerText} | NPC：{noCarriedResponse.NpcReply} | 后端：{noCarriedActions}");
+Assert(noCarriedActions == "RejectCarriedInventory",
+    "没有真实随身物品时不能进入展示执行器");
+
+var ambiguousRequest = ReplayRequest(
+    "你身上还有什么，拿出来看看。",
+    new NativeTradeContext
+    {
+        ClientCarriedItems = new List<NativeItemContext>
+        {
+            replayClientItem,
+            new()
+            {
+                RuntimeKey = 703,
+                ItemKey = "water_large",
+                DisplayName = "大瓶装水",
+                Owner = "client",
+                CurrentValue = 20
+            }
+        }
+    });
+var ambiguousResponse = replayEngine.Reply(ambiguousRequest);
+var ambiguousActions = ReplayActions(ambiguousRequest, ambiguousResponse);
+Console.WriteLine($"[REPLAY] 随身库存-多件未指定 | 玩家：{ambiguousRequest.PlayerText} | NPC：{ambiguousResponse.NpcReply} | 后端：{ambiguousActions}");
+Assert(ambiguousActions == "RejectCarriedInventory",
+    "多件随身物未指定时不能擅自摆第一件");
+
+var wholesalePhrases = new[]
+{
+    "批发价按九折算吗？",
+    "要是批量买，给我九折？",
+    "批发就按90%价格吧。"
+};
+foreach (var phrase in wholesalePhrases)
+{
+    var request = ReplayRequest(phrase);
+    request.GameContext.Trade.IsOfferWholesale = true;
+    request.GameContext.Trade.WholesaleDiscountPercent = 20;
+    request.GameContext.Trade.FinalOfferValue = 80;
+    var response = new ConversationResponse { NpcReply = "批发按九折给你。" };
+    var actions = ReplayActions(request, response);
+    Console.WriteLine($"[REPLAY] 批发价-不一致 | 玩家：{phrase} | NPC：{response.NpcReply} | 后端：{actions}");
+    Assert(response.NpcReply.Contains("收银台", StringComparison.Ordinal),
+        $"批发价不一致时未回退收银台：{phrase}");
+}
+
+var mixedRequest = ReplayRequest(
+    "用报纸换小瓶装水，再补我5信用点。",
+    new NativeTradeContext
+    {
+        ClientCarriedItems = new List<NativeItemContext> { replayClientItem },
+        PlayerOfferedItems = new List<NativeItemContext> { replayPlayerItem }
+    });
+var mixedReplayResponse = new ConversationResponse
+{
+    NpcReply = "可以交换，我再补5信用点。",
+    BarterProposal = new BarterProposal
+    {
+        Explicit = true,
+        Accepted = true,
+        ClientItemRuntimeKey = 701,
+        RequiredPlayerItemRuntimeKey = 702,
+        ValueAssessment = new BarterValueAssessment
+        {
+            Decision = "accept",
+            Reason = "双方价值相当"
+        }
+    },
+    WalletTransfer = new WalletTransferProposal
+    {
+        Explicit = true,
+        Accepted = true,
+        Amount = 5,
+        Source = "client_budget"
+    }
+};
+var mixedReplayActions = ReplayActions(mixedRequest, mixedReplayResponse, normalize: false);
+Console.WriteLine($"[REPLAY] 混合交换 | 玩家：{mixedRequest.PlayerText} | NPC：{mixedReplayResponse.NpcReply} | 后端：{mixedReplayActions}");
+Assert(mixedReplayActions.Contains("OpenNativeBarter", StringComparison.Ordinal) &&
+       mixedReplayActions.Contains("QueueWalletTransfer(5)", StringComparison.Ordinal),
+    "混合交换没有同时保留交换和补付款执行动作");
+
+var phonePhrases = new[] { "那先挂了。", "今天就聊到这里，拜拜。", "我不打扰了，结束通话吧。" };
+foreach (var phrase in phonePhrases)
+{
+    var request = ReplayRequest(phrase, scene: "phone");
+    var response = new ConversationResponse { NpcReply = phrase };
+    var actions = ReplayActions(request, response);
+    Console.WriteLine($"[REPLAY] 电话结束 | 玩家：{phrase} | NPC：{response.NpcReply} | 后端：{actions}");
+    Assert(actions == "StopPhoneCall(after-reply)", $"电话结束未触发挂断：{phrase}");
+}
+
 Console.WriteLine("Bargain scope regression harness passed.");

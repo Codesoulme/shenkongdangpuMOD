@@ -194,11 +194,15 @@ internal static class ProcurementRequestResolver
         var hasPurchaseIntent = ContainsAny(
             text,
             "我收", "我会收", "我买", "我要", "给我", "需要", "想要", "高价", "加价", "多给", "多付", "采购");
+        var hasDirectRequest = ContainsAny(
+            text,
+            "帮我", "替我", "帮忙", "找点", "找些", "带点", "带些", "弄到", "搞到", "找来", "带来");
         var hasGoodsTarget = ContainsAny(
             text,
             "货", "东西", "物品", "商品", "食品", "食物", "水", "饮料", "药", "医疗", "材料", "建材",
             "日用品", "武器", "枪", "工具", "设备", "模块", "芯片", "门禁", "卡", "废品", "垃圾", "零件");
-        return hasFuture && hasSearchAction && hasPurchaseIntent && hasGoodsTarget;
+        return hasFuture && hasSearchAction && hasGoodsTarget &&
+               (hasPurchaseIntent || hasDirectRequest);
     }
 
     public static string NormalizeCategory(string? category) =>
