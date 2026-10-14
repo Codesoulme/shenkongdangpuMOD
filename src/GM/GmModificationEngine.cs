@@ -108,6 +108,9 @@ public static class GmModificationEngine
             !GmInterfaceCatalog.IsExecutablePath(p.Path))
         { reason = "目标路径已发现但没有接通可验证执行器"; return false; }
         if (!Fields.Contains(p.Field) || !p.Operation.Equals("add", StringComparison.OrdinalIgnoreCase) && !p.Operation.Equals("replace", StringComparison.OrdinalIgnoreCase)) { reason = "字段或操作不在白名单"; return false; }
+        if (p.Path is "price_modifier" or "demand_modifier" or "supply_modifier" &&
+            !p.Field.Equals(p.Path, StringComparison.OrdinalIgnoreCase))
+        { reason = "目标路径与写入字段不一致"; return false; }
         if (p.Confidence < 0.60 || p.DurationDays is < 0 or > 30 || Math.Abs(p.Value) > 0.50) { reason = "置信度、期限或幅度越界"; return false; }
         return true;
     }

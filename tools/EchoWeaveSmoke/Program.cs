@@ -424,6 +424,22 @@ void GmGoalPathSafetyFlow()
     Assert(GmInterfaceCatalog.FindExecutableGoalPaths("change_prices")
                .Any(x => x.Path.Equals("price_modifier", StringComparison.OrdinalIgnoreCase)),
         "已接通的价格目标路径没有出现在可执行目录。");
+    var mismatched = new WorldModificationProposal
+    {
+        TargetKey = "global",
+        Field = "supply_modifier",
+        Operation = "add",
+        Value = 0.1,
+        DurationDays = 1,
+        Title = "路径字段错配",
+        Summary = "测试错配",
+        Evidence = "测试证据",
+        Confidence = 0.9,
+        Goal = "change_prices",
+        Path = "price_modifier"
+    };
+    Assert(!GmModificationEngine.Apply(state, new[] { mismatched }).Applied,
+        "目标路径和字段错配时不应写入世界修正。");
 }
 
 void DailyEventFlow()
