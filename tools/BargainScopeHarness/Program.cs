@@ -129,6 +129,10 @@ Assert(!ConversationActionResolver.ShouldDismissStoreClient(
     storeRequest,
     new ConversationResponse { NpcReply = "我不走，我还要看看。" }),
     "顾客明确说不走时不能误触发离店");
+Assert(!ConversationActionResolver.ShouldDismissStoreClient(
+    storeRequest,
+    new ConversationResponse { NpcReply = "我走过去看看。" }),
+    "普通移动描述不能被误判成顾客离店");
 var phoneRequest = new ConversationRequest { Scene = "phone" };
 Assert(ConversationActionResolver.ShouldHangUpPhone(
     phoneRequest,

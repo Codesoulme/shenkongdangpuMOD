@@ -39,8 +39,8 @@ internal static class ConversationActionResolver
             return false;
         return ContainsDeparture(
                    response.NpcReply,
-                   "走", "离开", "离店", "不买了", "不谈了", "不聊了", "告辞", "再见", "下次再来",
-                   "没什么好谈", "不想再谈", "到此为止", "滚开", "出去", "别烦") ||
+            "我走了", "我先走", "我得走", "我要走", "先走了", "走了", "离开", "离店", "不买了", "不谈了", "不聊了", "告辞", "再见", "下次再来",
+            "没什么好谈", "不想再谈", "到此为止", "滚开", "滚出去", "请出去", "别烦") ||
                (response.Signals is not null &&
                 (response.Signals.Offense >= 2 || response.Signals.Threat >= 2) &&
                 ContainsAny(response.NpcReply, "不想谈", "别再", "别来", "结束"));
