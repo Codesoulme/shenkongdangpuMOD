@@ -80,6 +80,46 @@ var nonPriceNumber = TradeProposalResolver.Resolve(
     generated: null);
 Assert(!nonPriceNumber.Explicit, "普通数字不能被误判为报价");
 
+var revokedDiscount = TradeProposalResolver.Resolve(
+    "开始你不要铁锈水的话，这捅优质水也不能八折给你了。",
+    trade,
+    generated: null);
+Assert(!revokedDiscount.Explicit, "否定八折不能被解析成可执行折扣");
+Assert(revokedDiscount.RevokesPriorPriceChange, "否定八折应标记为撤回既有价格约定");
+
+var offeredDiscount = TradeProposalResolver.Resolve(
+    "如果你不要铁锈水，我可以给你八折优质水。",
+    trade,
+    generated: null);
+Assert(offeredDiscount.Explicit && offeredDiscount.Kind == "offer_discount" && offeredDiscount.Percent == 20,
+    "条件句中的正向八折仍应被识别为折扣提议");
+
+var askedDiscount = TradeProposalResolver.Resolve(
+    "你能不能给我八折？",
+    trade,
+    generated: null);
+Assert(askedDiscount.Explicit && askedDiscount.Kind == "offer_discount" && askedDiscount.Percent == 20,
+    "询问能否八折不能被误判成撤回");
+
+var floorPrice = TradeProposalResolver.Resolve(
+    "这桶优质水不能低于八折。",
+    trade,
+    generated: null);
+Assert(!floorPrice.Explicit && !floorPrice.RevokesPriorPriceChange,
+    "不能低于八折只能阻断自动议价，不能删除既有价格约定");
+
+var generatedDiscount = TradeProposalResolver.Resolve(
+    "开始你不要铁锈水的话，这捅优质水也不能八折给你了。",
+    trade,
+    generated: new TradeProposal
+    {
+        Kind = "offer_discount",
+        Percent = 20,
+        Explicit = true,
+        Reason = "模型误读"
+    });
+Assert(!generatedDiscount.Explicit, "否定句不能被模型的正向折扣提案覆盖");
+
 var storeRequest = new ConversationRequest { Scene = "store" };
 Assert(ConversationActionResolver.ShouldDismissStoreClient(
     storeRequest,

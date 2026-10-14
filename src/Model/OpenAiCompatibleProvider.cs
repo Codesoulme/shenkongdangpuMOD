@@ -1401,7 +1401,7 @@ public sealed class OpenAiCompatibleProvider : IModelProvider
 物品归属以 owner 为准：client 是顾客带来的，player 才是玩家拥有的，unknown 时不得猜。显示名、柜台位置、“未拥有”标签、交易方向和合并柜台清单都不能推翻 owner。电话场景不得谈成店内交易。
 ";
 
-    private const string TradeInstructionBlock = @"价格提议规则：trade_proposal 只提取玩家明确提出的价格变化，不代表人物接受。kind 只能为 offer_discount、ask_markup、offer_buying_markup、ask_buying_discount；percent 和 target_amount 只填原话可确定的值。原版流程决定接受、拒绝、离开与最终金额。
+    private const string TradeInstructionBlock = @"价格提议规则：trade_proposal 只提取玩家明确提出的价格变化，不代表人物接受。kind 只能为 offer_discount、ask_markup、offer_buying_markup、ask_buying_discount；percent 和 target_amount 只填原话可确定的值。原版流程决定接受、拒绝、离开与最终金额。若玩家使用“不能八折”“不再打折”“撤回优惠”“这次不算”等否定或撤回表达，不要生成正向折扣或加价提案。
 ";
 
     private const string ProcurementInstructionBlock = @"未来找货规则：只有玩家明确请当前人物未来寻找或带来某类货物，且 procurement.can_request_future_goods=true 时才返回 procurement_proposal。必须遵守 category_access；无法唯一归类则 clarification_needed=true、accepted=false 并追问。允许也只可答应尝试，不能保证找到。category 限定为 none、food、medical、material、household、weapon、tool、module、access_card、junk。

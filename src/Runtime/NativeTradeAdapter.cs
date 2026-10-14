@@ -91,6 +91,7 @@ internal static class NativeTradeAdapter
                         Kind = pending.Proposal.Kind,
                         Percent = pending.Proposal.Percent,
                         TargetAmount = pending.Proposal.TargetAmount,
+                        RevokesPriorPriceChange = pending.Proposal.RevokesPriorPriceChange,
                         Explicit = false,
                         Reason = "等待玩家确认价格约定是否包含后续新增商品",
                         Scope = BargainScopes.Ambiguous,
@@ -104,6 +105,7 @@ internal static class NativeTradeAdapter
                     Kind = pending.Proposal.Kind,
                     Percent = pending.Proposal.Percent,
                     TargetAmount = pending.Proposal.TargetAmount,
+                    RevokesPriorPriceChange = pending.Proposal.RevokesPriorPriceChange,
                     Explicit = true,
                     Reason = pending.Proposal.Reason,
                     Scope = clarifiedScope,
@@ -136,6 +138,7 @@ internal static class NativeTradeAdapter
                             Kind = proposal.Kind,
                             Percent = proposal.Percent,
                             TargetAmount = proposal.TargetAmount,
+                            RevokesPriorPriceChange = proposal.RevokesPriorPriceChange,
                             Reason = proposal.Reason
                         },
                         CurrentItemId = item.uniqueId,
@@ -148,9 +151,30 @@ internal static class NativeTradeAdapter
                     return Result(true, false, proposal, response.NpcReply);
                 }
             }
+            else if (proposal.RevokesPriorPriceChange &&
+                     proposal.Scope == BargainScopes.Ambiguous)
+            {
+                BargainAgreementRegistry.SetPending(new PendingBargainClarification
+                {
+                    ClientKey = liveClientKey,
+                    Direction = request.GameContext.Trade.Direction,
+                    PlayerText = request.PlayerText,
+                    Proposal = new TradeProposalSnapshot
+                    {
+                        RevokesPriorPriceChange = true,
+                        Reason = proposal.Reason
+                    },
+                    CurrentItemId = item.uniqueId,
+                    SnapshotItemIds = sourceSnapshotIds.ToList()
+                });
+                response.TradeProposal = proposal;
+                response.NpcReply = BuildClarificationQuestion();
+                return Result(true, false, proposal, response.NpcReply);
+            }
 
             response.TradeProposal = proposal;
-            if (!proposal.Explicit || proposal.Kind == "none")
+            if ((!proposal.Explicit || proposal.Kind == "none") &&
+                !proposal.RevokesPriorPriceChange)
             {
                 MelonLogger.Msg(
                     $"[当铺世界] 自由交谈议价未执行：回合 {request.TurnId}，" +
@@ -171,14 +195,13 @@ internal static class NativeTradeAdapter
                     return Result(true, false, proposal, "原版议价器当前跟踪的是另一位来客");
             }
 
-            var canInvoke = CanInvoke(bargain, proposal.Kind);
-            MelonLogger.Msg(
-                $"[当铺世界] 原版议价接口校验：回合 {request.TurnId}，" +
-                $"类型={proposal.Kind}，允许调用={canInvoke}");
-            if (!canInvoke)
-                return Result(true, false, proposal, "原版规则当前不允许这项议价");
-
-            var allAffectedItems = SnapshotAffectedUniverse(
+            var allAffectedItems = proposal.RevokesPriorPriceChange
+                ? SnapshotRelevantItems(
+                    request.GameContext.Trade.Direction,
+                    playerStore,
+                    negotiation,
+                    item)
+                : SnapshotAffectedUniverse(
                 request.GameContext.Trade.Direction,
                 playerStore,
                 item);
@@ -207,6 +230,40 @@ internal static class NativeTradeAdapter
                 response.NpcReply = "我没看出你说的是哪件商品。请点明商品名称，或者说“当前这些”。";
                 return Result(true, false, proposal, response.NpcReply);
             }
+
+            if (proposal.RevokesPriorPriceChange)
+            {
+                var revoked = BargainAgreementRegistry.Revoke(
+                    liveClientKey,
+                    request.GameContext.Trade.Direction,
+                    targetIds,
+                    proposal.Scope == BargainScopes.AllCurrentAndFuture);
+                if (revoked.Count == 0)
+                    return Result(true, false, proposal, "没有找到可撤回的对话价格约定");
+
+                foreach (var agreement in revoked)
+                {
+                    foreach (var candidate in allAffectedItems)
+                    {
+                        if (agreement.ItemIds.Contains(candidate.uniqueId))
+                            candidate.RemoveItemFeatureByID(agreement.FeatureId);
+                    }
+                }
+
+                playerStore?.RefreshCounterItem();
+                (NegociationUIManager.Instance ?? negotiation)?.RefreshUI();
+                MelonLogger.Msg(
+                    $"[当铺世界] 已撤回对话价格约定：回合 {request.TurnId}，" +
+                    $"商品数={revoked.Sum(agreement => agreement.ItemIds.Count)}");
+                return Result(true, false, proposal, "已撤回此前的对话价格约定");
+            }
+
+            var canInvoke = CanInvoke(bargain, proposal.Kind);
+            MelonLogger.Msg(
+                $"[当铺世界] 原版议价接口校验：回合 {request.TurnId}，" +
+                $"类型={proposal.Kind}，允许调用={canInvoke}");
+            if (!canInvoke)
+                return Result(true, false, proposal, "原版规则当前不允许这项议价");
 
             var templateFeature = BargainAgreementRegistry.CreateFeature(
                 proposal.Kind,

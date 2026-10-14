@@ -352,6 +352,9 @@ public sealed class TradeProposal
     public string Scope { get; set; } = "unspecified";
     [JsonPropertyName("scope_reason")]
     public string ScopeReason { get; set; } = string.Empty;
+
+    [JsonIgnore]
+    public bool RevokesPriorPriceChange { get; set; }
 }
 
 public sealed class ProcurementProposal

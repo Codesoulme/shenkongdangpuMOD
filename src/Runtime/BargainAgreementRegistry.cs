@@ -18,6 +18,7 @@ internal sealed class TradeProposalSnapshot
     public string Kind { get; init; } = "none";
     public int Percent { get; init; }
     public long? TargetAmount { get; init; }
+    public bool RevokesPriorPriceChange { get; init; }
     public string Reason { get; init; } = string.Empty;
 }
 
@@ -72,6 +73,41 @@ internal static class BargainAgreementRegistry
             existing.Kind.Equals(agreement.Kind, StringComparison.OrdinalIgnoreCase));
         Agreements.Add(agreement);
         _pending = null;
+    }
+
+    public static IReadOnlyList<(string FeatureId, List<int> ItemIds)> Revoke(
+        string clientKey,
+        string direction,
+        IReadOnlySet<int> targetIds,
+        bool includeFuture)
+    {
+        var matches = Agreements
+            .Where(agreement =>
+                agreement.ClientKey.Equals(clientKey, StringComparison.OrdinalIgnoreCase) &&
+                agreement.Direction.Equals(direction, StringComparison.OrdinalIgnoreCase) &&
+                (includeFuture || agreement.ItemIds.Overlaps(targetIds)))
+            .ToList();
+        var revoked = new List<(string FeatureId, List<int> ItemIds)>();
+        foreach (var agreement in matches)
+        {
+            var itemIds = includeFuture
+                ? agreement.ItemIds.ToList()
+                : agreement.ItemIds.Where(targetIds.Contains).ToList();
+            revoked.Add((agreement.FeatureId, itemIds));
+            if (includeFuture)
+            {
+                Agreements.Remove(agreement);
+                continue;
+            }
+
+            agreement.ItemIds.RemoveWhere(targetIds.Contains);
+            if (agreement.ItemIds.Count == 0)
+                Agreements.Remove(agreement);
+        }
+
+        if (revoked.Count > 0)
+            _pending = null;
+        return revoked;
     }
 
     public static string BuildUiSection(GameItem? item)

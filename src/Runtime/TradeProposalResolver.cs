@@ -21,6 +21,21 @@ internal static class TradeProposalResolver
         @"(?<![零〇一二两三四五六七八九十百])(?<chinese_amount>[零〇一二两三四五六七八九十百]+)" +
         @"(?![零〇一二两三四五六七八九十百]|\s*(?:%|折|天|件|个|岁|号|轮))",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    private static readonly Regex PriceExpressionRegex = new(
+        @"半价|[零〇一二两三四五六七八九十0-9]+(?:[点\.]?[零〇一二三四五六七八九0-9]+)?\s*折|" +
+        @"(?:\d{1,3}(?:\.\d+)?\s*%|百分之\s*[零〇一二两三四五六七八九十百]+)",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
+    private static readonly Regex NegatedPriceBeforeRegex = new(
+        @"(?:不能|不可以|无法|没法|不再|不会|不愿|不肯|不想|不给|不提供|不打算|不是|取消|撤回|收回|作废|拒绝|别(?:再)?)[^，。；！？!?]{0,10}$",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    private static readonly string[] NegatedPriceAfterCues =
+    {
+        "不算", "取消", "撤回", "收回", "作废", "不能", "不可以", "不给"
+    };
+    private static readonly string[] PriceQuestionCues =
+    {
+        "能不能", "可不可以", "能否", "是否可以", "可以吗", "行不行"
+    };
 
     public static TradeProposal Resolve(
         string playerText,
@@ -32,6 +47,13 @@ internal static class TradeProposalResolver
             return None("当前没有可议价的原版交易");
 
         var text = playerText.Trim();
+        if (ContainsNegatedPriceChange(text))
+        {
+            return ContainsExplicitPriceRevocation(text)
+                ? Revocation(text, currentItemCount)
+                : None("玩家否定了该价格变化，未执行议价");
+        }
+
         var deterministic = ParseDeterministic(text, trade);
         if (deterministic.Kind != "none")
             return WithScope(deterministic, text, currentItemCount);
@@ -140,6 +162,67 @@ internal static class TradeProposalResolver
         }
 
         return None("未发现可安全执行的明确议价");
+    }
+
+    private static TradeProposal Revocation(string text, int currentItemCount)
+    {
+        var decision = BargainScopeResolver.Resolve(text, currentItemCount);
+        return new TradeProposal
+        {
+            Kind = "none",
+            Explicit = false,
+            RevokesPriorPriceChange = true,
+            Reason = "玩家明确否定或撤回此前的价格约定",
+            Scope = decision.Scope,
+            ScopeReason = decision.Reason
+        };
+    }
+
+    private static bool ContainsNegatedPriceChange(string text)
+    {
+        foreach (Match match in PriceExpressionRegex.Matches(text))
+        {
+            var beforeStart = Math.Max(0, match.Index - 18);
+            var before = text[beforeStart..match.Index];
+            var afterStart = match.Index + match.Length;
+            var afterLength = Math.Min(14, text.Length - afterStart);
+            var after = afterLength > 0 ? text.Substring(afterStart, afterLength) : string.Empty;
+            if (ContainsAny(before, PriceQuestionCues) || ContainsAny(after, PriceQuestionCues))
+                continue;
+
+            if (NegatedPriceBeforeRegex.IsMatch(before))
+                return true;
+
+            if (ContainsAny(after, NegatedPriceAfterCues))
+                return true;
+        }
+
+        return false;
+    }
+
+    private static bool ContainsExplicitPriceRevocation(string text)
+    {
+        foreach (Match match in PriceExpressionRegex.Matches(text))
+        {
+            var beforeStart = Math.Max(0, match.Index - 18);
+            var before = text[beforeStart..match.Index];
+            var afterStart = match.Index + match.Length;
+            var afterLength = Math.Min(14, text.Length - afterStart);
+            var after = afterLength > 0 ? text.Substring(afterStart, afterLength) : string.Empty;
+            if (ContainsAny(before, PriceQuestionCues) || ContainsAny(after, PriceQuestionCues))
+                continue;
+
+            if (Regex.IsMatch(
+                    before,
+                    @"(?:不再|不会|不愿|不肯|不想|不给|不提供|不打算|不是|取消|撤回|收回|作废|拒绝|别(?:再)?)[^，。；！？!?]{0,10}$",
+                    RegexOptions.CultureInvariant) ||
+                ContainsAny(after, "不算", "取消", "撤回", "收回", "作废") ||
+                (ContainsAny(before, "不能", "不可以", "无法", "没法") &&
+                 ContainsAny(before + after, "给", "卖", "提供")))
+                return true;
+        }
+
+        return false;
     }
 
     private static long? ExtractBareTargetAmount(string text)
