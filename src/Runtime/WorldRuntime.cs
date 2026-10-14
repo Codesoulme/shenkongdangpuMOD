@@ -724,7 +724,7 @@ public sealed class WorldRuntime
                 "inventory.reveal.carried",
                 carried.Message,
                 carried.Applied ? EchoWeaveIntentStatus.Fulfilled : EchoWeaveIntentStatus.Rejected);
-        return barter.Applied;
+        return barter.Applied || carried.Applied;
     }
 
     public NativeTradeApplication ApplyNativeTrade(

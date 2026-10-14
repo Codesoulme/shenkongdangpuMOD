@@ -439,7 +439,7 @@ public sealed class OpenAiCompatibleProvider : IModelProvider
             var text = request.PlayerText;
             var includeTrade = ContainsAny(text,
                 "价格", "价钱", "多少钱", "便宜", "贵", "折", "优惠", "加价", "报价",
-                "信用点", "预算", "补付", "付款", "支付", "给我", "买", "卖", "交易",
+                "批发", "批发价", "wholesale", "信用点", "预算", "补付", "付款", "支付", "给我", "买", "卖", "交易",
                 "交换", "换", "物品", "东西", "货", "随身", "price", "discount", "trade",
                 "barter", "buy", "sell", "pay", "swap", "exchange");
             var includeProcurement = ContainsAny(text,
@@ -512,6 +512,8 @@ public sealed class OpenAiCompatibleProvider : IModelProvider
                     phase = trade.Phase,
                     direction = trade.Direction,
                     item = trade.Item,
+                    is_offer_wholesale = trade.IsOfferWholesale,
+                    wholesale_discount_percent = trade.WholesaleDiscountPercent,
                     final_offer_value = trade.FinalOfferValue,
                     client_wants_item = trade.ClientWantsItem,
                     client_refuses_item = trade.ClientRefusesItem,
@@ -539,6 +541,8 @@ public sealed class OpenAiCompatibleProvider : IModelProvider
             client_buy_price_modifier = trade.ClientBuyPriceModifier,
             client_sell_price_modifier = trade.ClientSellPriceModifier,
             client_impatience = trade.ClientImpatience,
+            is_offer_wholesale = trade.IsOfferWholesale,
+            wholesale_discount_percent = trade.WholesaleDiscountPercent,
             item = trade.Item,
             client_inventory_count = trade.ClientInventoryCount,
             client_inventory_truncated = trade.ClientInventoryTruncated,
@@ -701,7 +705,7 @@ public sealed class OpenAiCompatibleProvider : IModelProvider
 
         return ContainsAny(text,
             "价格", "价钱", "多少钱", "便宜", "贵", "折", "优惠", "加价", "报价",
-            "信用点", "预算", "补付", "付款", "支付", "给我", "买", "卖", "交易",
+            "批发", "批发价", "wholesale", "信用点", "预算", "补付", "付款", "支付", "给我", "买", "卖", "交易",
             "交换", "换", "物品", "东西", "货", "带来", "带点", "找货", "寻找",
             "回访", "再来", "回来", "联系", "通知", "转告", "任务", "警察", "巡逻",
             "小偷", "偷", "盗", "失窃", "警报", "防盗", "保险", "新闻", "供应",
@@ -730,8 +734,8 @@ public sealed class OpenAiCompatibleProvider : IModelProvider
         var builder = new StringBuilder(DetailedConversationCorePrompt);
 
         if (ContainsAny(text,
-                "价格", "价钱", "多少钱", "便宜", "贵", "折", "优惠", "加价", "报价",
-                "price", "discount"))
+            "价格", "价钱", "多少钱", "便宜", "贵", "折", "优惠", "加价", "报价",
+                "批发", "批发价", "wholesale", "price", "discount"))
             builder.Append(TradeInstructionBlock);
 
         if (ContainsAny(text,
@@ -1216,6 +1220,10 @@ public sealed class OpenAiCompatibleProvider : IModelProvider
 
         proposal.Explicit = ReadBool(value, "explicit");
         proposal.Accepted = ReadBool(value, "accepted");
+        var runtimeKey = ReadInt(value, "item_runtime_key");
+        proposal.ItemRuntimeKey = runtimeKey > 0 ? runtimeKey : null;
+        proposal.ItemKey = ReadString(value, "item_key") ?? string.Empty;
+        proposal.ItemName = ReadString(value, "item_name") ?? string.Empty;
         proposal.Reason = ReadString(value, "reason") ?? string.Empty;
         return proposal;
     }
@@ -1401,7 +1409,7 @@ public sealed class OpenAiCompatibleProvider : IModelProvider
 物品归属以 owner 为准：client 是顾客带来的，player 才是玩家拥有的，unknown 时不得猜。显示名、柜台位置、“未拥有”标签、交易方向和合并柜台清单都不能推翻 owner。电话场景不得谈成店内交易。
 ";
 
-    private const string TradeInstructionBlock = @"价格提议规则：trade_proposal 只提取玩家明确提出的价格变化，不代表人物接受。kind 只能为 offer_discount、ask_markup、offer_buying_markup、ask_buying_discount；percent 和 target_amount 只填原话可确定的值。原版流程决定接受、拒绝、离开与最终金额。若玩家使用“不能八折”“不再打折”“撤回优惠”“这次不算”等否定或撤回表达，不要生成正向折扣或加价提案。
+    private const string TradeInstructionBlock = @"价格提议规则：trade_proposal 只提取玩家明确提出的价格变化，不代表人物接受。kind 只能为 offer_discount、ask_markup、offer_buying_markup、ask_buying_discount；percent 和 target_amount 只填原话可确定的值。原版流程决定接受、拒绝、离开与最终金额。若玩家使用“不能八折”“不再打折”“撤回优惠”“这次不算”等否定或撤回表达，不要生成正向折扣或加价提案。若 trade.is_offer_wholesale=true，批发折扣只能引用 trade.wholesale_discount_percent，且批发成交金额只能引用 trade.final_offer_value；不得自行编造另一种折扣或金额。字段缺失时只能说按当前收银台报价，不要报出几折。
 ";
 
     private const string ProcurementInstructionBlock = @"未来找货规则：只有玩家明确请当前人物未来寻找或带来某类货物，且 procurement.can_request_future_goods=true 时才返回 procurement_proposal。必须遵守 category_access；无法唯一归类则 clarification_needed=true、accepted=false 并追问。允许也只可答应尝试，不能保证找到。category 限定为 none、food、medical、material、household、weapon、tool、module、access_card、junk。
@@ -1410,7 +1418,7 @@ public sealed class OpenAiCompatibleProvider : IModelProvider
     private const string ReturnVisitInstructionBlock = @"回访规则：不含找货内容的未来回访邀请才使用 return_visit_proposal；玩家明确邀请且人物在回复中明确答应时 accepted=true。它只登记未来来访，不保证具体到店时间。
 ";
 
-    private const string CarriedInventoryInstructionBlock = @"随身物品规则：玩家要求查看顾客本次携带的其他货物时才使用 carried_inventory_proposal；只有人物同意且 client_carried_items 中确有 owner=client 的物品时 accepted=true。
+    private const string CarriedInventoryInstructionBlock = @"随身物品规则：玩家要求查看顾客本次携带的其他货物时才使用 carried_inventory_proposal；只有人物同意且 client_carried_items 中确有 owner=client 的物品时 accepted=true。item_runtime_key、item_key、item_name 只能从该列表中选择；没有真实物品时必须拒绝，不能说有一件并承诺拿出来。列表有多件且玩家没有指定时，不要擅自挑选，应先追问。
 ";
 
     private const string BarterInstructionBlock = @"混合交换规则：明确以物换物才返回 barter_proposal。client_item_runtime_key 必须来自 owner=client；required_player_item_runtime_key 或 runtime_keys 必须来自 owner=player，并优先用运行时编号唯一定位。不得用顾客物品充当玩家物品，不得虚构。必须读取 trade.client_carried_items 和 trade.player_offered_items 中的 base_value、current_value、negotiated_value、quantity，比较顾客给出的一侧（包括补付款）与玩家给出的一侧。value_assessment.decision 只能为 accept、reject、adjust 或 unknown，并填写简短理由；价值缺失、归属不明或明显失衡时不得 accepted=true，应拒绝或要求调整。模型填写的金额只是判断依据，Mod 会在成交前再次用原版数据校验。若同一提议还包含补付，另按补付规则返回 wallet_transfer，两个提案都只描述约定条件，等待原版确认后一起结算。

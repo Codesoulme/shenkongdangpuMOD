@@ -37,8 +37,11 @@ public sealed class LocalFallbackEngine
 
         if (LooksLikeCarriedInventoryRequest(request))
         {
-            var hasItems = request.GameContext.Trade.ClientCarriedItems.Any(x =>
-                IsCapturedItem(x, "client"));
+            var carriedItems = request.GameContext.Trade.ClientCarriedItems
+                .Where(x => IsCapturedItem(x, "client"))
+                .ToList();
+            var hasItems = carriedItems.Count > 0;
+            var selectedCarried = carriedItems.Count == 1 ? carriedItems[0] : null;
             return new ConversationResponse
             {
                 NpcReply = hasItems
@@ -52,6 +55,9 @@ public sealed class LocalFallbackEngine
                 {
                     Explicit = true,
                     Accepted = hasItems,
+                    ItemRuntimeKey = selectedCarried?.RuntimeKey > 0 ? selectedCarried.RuntimeKey : null,
+                    ItemKey = selectedCarried?.ItemKey ?? string.Empty,
+                    ItemName = selectedCarried?.DisplayName ?? string.Empty,
                     Reason = hasItems ? "本地降级规则确认存在临时随身物" : "顾客没有临时随身物"
                 }
             };

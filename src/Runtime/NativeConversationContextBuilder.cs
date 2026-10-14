@@ -540,6 +540,10 @@ internal static class NativeConversationContextBuilder
         trade.ClientBuyPriceModifier = client.buyPriceModifier;
         trade.ClientSellPriceModifier = client.sellPriceModifier;
         trade.ClientImpatience = client.clientImpatience;
+        trade.IsOfferWholesale = client.isOfferWholesale;
+        trade.WholesaleDiscountPercent = client.isOfferWholesale
+            ? Math.Clamp(client.wholesaleDiscount, 0, 100)
+            : 0;
 
         // Capture ownership once so items moved from a customer's inventory to
         // the counter keep their original owner in every part of the context.

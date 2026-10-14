@@ -131,23 +131,62 @@ internal static class TemporaryClientInventoryAdapter
             var state = world.CarriedInventories.LastOrDefault(x =>
                 x.VisitDay == world.CurrentDay &&
                 x.OriginalClientIdentifier.Equals(clientKey, StringComparison.OrdinalIgnoreCase));
-            if (state is null || state.RuntimeItemKeys.Count == 0)
-                return Result(true, false, "这名买家本次没有可展示的临时随身物");
-
-            GameItem? first = null;
+            var ownership = CounterOwnershipSnapshot.Capture(playerStore, instance);
+            var candidates = new List<GameItem>();
             for (var i = 0; i < instance.gridInv.items.Count; i++)
+                AddUnique(candidates, instance.gridInv.items[i]);
+            foreach (var item in ownership.ClientCounterItems)
+                AddUnique(candidates, item);
+
+            var proposalKey = proposal.ItemRuntimeKey.GetValueOrDefault();
+            GameItem? first = proposalKey > 0
+                ? candidates.FirstOrDefault(item => SafeRuntimeKey(item) == proposalKey)
+                : null;
+            if (first is null &&
+                (!string.IsNullOrWhiteSpace(proposal.ItemName) ||
+                 !string.IsNullOrWhiteSpace(proposal.ItemKey)))
             {
-                var candidate = instance.gridInv.items[i];
-                if (candidate is not null && state.RuntimeItemKeys.Contains(candidate.uniqueId))
-                {
-                    first = candidate;
-                    break;
-                }
+                var matches = candidates
+                    .Where(item => MatchesProposal(item, proposal))
+                    .ToList();
+                if (matches.Count == 1)
+                    first = matches[0];
             }
+
+            if (first is null && state is not null)
+            {
+                var generated = candidates
+                    .Where(item => state.RuntimeItemKeys.Contains(SafeRuntimeKey(item)))
+                    .ToList();
+                if (generated.Count == 1)
+                    first = generated[0];
+            }
+            if (first is null && candidates.Count == 1)
+                first = candidates[0];
             if (first is null)
-                return Result(true, false, "随身物已经不在顾客物品栏");
+                return Result(true, false, candidates.Count == 0
+                    ? "当前顾客没有可验证的随身物品"
+                    : "顾客随身物品无法唯一对应本次展示请求");
 
             var itemKey = first.uniqueId;
+            if (ownership.ClientCounterIds.Contains(itemKey))
+            {
+                MelonLogger.Msg($"[当铺世界] 顾客随身物已经在顾客侧柜台：{clientKey} / {itemKey}");
+                return Result(true, true, "顾客随身物已经摆在顾客侧柜台");
+            }
+
+            // Keep a visit-scoped restoration record for original customer
+            // inventory too; previously only Mod-generated items had one.
+            state ??= new CarriedInventoryState
+            {
+                CharacterKey = FirstNotBlank(request.CharacterKey, clientKey),
+                OriginalClientIdentifier = clientKey,
+                VisitDay = world.CurrentDay,
+                OriginalIntent = client.clientIntent.ToString()
+            };
+            if (!world.CarriedInventories.Contains(state))
+                world.CarriedInventories.Add(state);
+
             var originalIntent = client.clientIntent;
             var wasSellingUnlocked = state.SellingUnlocked;
             try
@@ -177,6 +216,14 @@ internal static class TemporaryClientInventoryAdapter
             {
                 // The item is already on the counter; keep the valid trade state.
                 MelonLogger.Warning($"[当铺世界] 随身物已摆出，但界面刷新失败：{ex.Message}");
+            }
+
+            var verified = CounterOwnershipSnapshot.Capture(playerStore, instance)
+                .ClientCounterIds.Contains(itemKey);
+            if (!verified)
+            {
+                MelonLogger.Warning($"[当铺世界] 随身物调用原版摆放后仍未在顾客侧柜台确认：{clientKey} / {itemKey}");
+                return Result(true, false, "原版柜台没有确认这件随身物已经摆出");
             }
             MelonLogger.Msg($"[当铺世界] 顾客同意展示随身物：{clientKey} / {itemKey}");
             return Result(true, true, "已切换为原版买卖双向流程并摆出一件随身物");
@@ -221,4 +268,56 @@ internal static class TemporaryClientInventoryAdapter
 
     private static string FirstNotBlank(params string?[] values) =>
         values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))?.Trim() ?? string.Empty;
+
+    private static void AddUnique(List<GameItem> items, GameItem? candidate)
+    {
+        if (candidate is null)
+            return;
+        var key = SafeRuntimeKey(candidate);
+        if (key > 0)
+        {
+            if (items.Any(item => SafeRuntimeKey(item) == key))
+                return;
+        }
+        else if (items.Contains(candidate))
+        {
+            return;
+        }
+        items.Add(candidate);
+    }
+
+    private static bool MatchesProposal(GameItem item, CarriedInventoryProposal proposal)
+    {
+        var labels = new[]
+        {
+            Safe(() => item.GetDisplayName(true), string.Empty),
+            item.name,
+            item.identifier
+        };
+        return labels.Any(label => SameItemText(label, proposal.ItemName)) ||
+               labels.Any(label => SameItemText(label, proposal.ItemKey));
+    }
+
+    private static bool SameItemText(string? left, string? right)
+    {
+        if (string.IsNullOrWhiteSpace(left) || string.IsNullOrWhiteSpace(right))
+            return false;
+        var a = left.Trim();
+        var b = right.Trim();
+        return a.Equals(b, StringComparison.OrdinalIgnoreCase) ||
+               a.Contains(b, StringComparison.OrdinalIgnoreCase) ||
+               b.Contains(a, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static int SafeRuntimeKey(GameItem? item)
+    {
+        try { return item?.uniqueId ?? 0; }
+        catch { return 0; }
+    }
+
+    private static T Safe<T>(Func<T> read, T fallback)
+    {
+        try { return read(); }
+        catch { return fallback; }
+    }
 }

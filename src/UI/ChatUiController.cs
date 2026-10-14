@@ -218,6 +218,8 @@ public sealed class ChatUiController
                 ? ApplyLiveActions(runtime, completedRequest, response)
                 : new NativeTradeApplication();
             var replyHandledByOriginalBargain = tradeResult.Invoked;
+            if (speakerStillPresent && completedRequest is not null && !replyHandledByOriginalBargain)
+                ConversationActionResolver.EnsureNaturalExitReply(completedRequest, response);
             var historyReply = replyHandledByOriginalBargain
                 ? tradeResult.Message
                 : response.NpcReply;
@@ -285,6 +287,13 @@ public sealed class ChatUiController
             // Opening a barter offer does not itself emit the model's reply;
             // the native game only speaks when an item is placed. Keep the
             // conversation reply in the normal presenter path immediately.
+            return new NativeTradeApplication();
+        }
+
+        if (nativeActionsApplied && response.CarriedInventoryProposal.Explicit)
+        {
+            // Revealing a carried item changes the native counter but does not
+            // consume the character's reply; keep it on the normal presenter.
             return new NativeTradeApplication();
         }
 

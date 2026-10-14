@@ -139,6 +139,128 @@ Assert(!ConversationActionResolver.ShouldHangUpPhone(
     new ConversationResponse { NpcReply = "先别挂，我还有话说。" }),
     "电话中明确要求别挂时不能误触发挂断");
 
+var carriedRequest = new ConversationRequest
+{
+    Scene = "store",
+    PlayerText = "你身上还有什么，拿出来我看看",
+    GameContext = new GameConversationContext
+    {
+        Trade = new NativeTradeContext
+        {
+            ClientCarriedItems = new List<NativeItemContext>
+            {
+                new()
+                {
+                    RuntimeKey = 501,
+                    ItemKey = "water_small",
+                    Identifier = "water_small",
+                    DisplayName = "小瓶装水",
+                    Owner = "client"
+                }
+            }
+        }
+    }
+};
+var carriedResponse = new ConversationResponse
+{
+    NpcReply = "有，我拿出来给你看看。",
+    CarriedInventoryProposal = new CarriedInventoryProposal
+    {
+        Explicit = true,
+        Accepted = true
+    }
+};
+ConversationActionResolver.Normalize(carriedRequest, carriedResponse);
+Assert(carriedResponse.CarriedInventoryProposal.Accepted &&
+       carriedResponse.CarriedInventoryProposal.ItemRuntimeKey == 501 &&
+       carriedResponse.CarriedInventoryProposal.ItemName == "小瓶装水",
+    "真实顾客随身物应被规范化为唯一运行时物品");
+
+var fabricatedCarried = new ConversationResponse
+{
+    NpcReply = "有，我拿出来给你看看。",
+    CarriedInventoryProposal = new CarriedInventoryProposal
+    {
+        Explicit = true,
+        Accepted = true,
+        ItemName = "虚构物品"
+    }
+};
+ConversationActionResolver.Normalize(
+    new ConversationRequest
+    {
+        Scene = "store",
+        PlayerText = carriedRequest.PlayerText,
+        GameContext = new GameConversationContext()
+    },
+    fabricatedCarried);
+Assert(!fabricatedCarried.CarriedInventoryProposal.Accepted,
+    "没有真实顾客库存时不能接受随身物品展示");
+
+var ambiguousCarried = new ConversationRequest
+{
+    Scene = "store",
+    PlayerText = carriedRequest.PlayerText,
+    GameContext = new GameConversationContext
+    {
+        Trade = new NativeTradeContext
+        {
+            ClientCarriedItems = new List<NativeItemContext>
+            {
+                new() { RuntimeKey = 601, ItemKey = "water_small", DisplayName = "小瓶装水", Owner = "client" },
+                new() { RuntimeKey = 602, ItemKey = "water_large", DisplayName = "大瓶装水", Owner = "client" }
+            }
+        }
+    }
+};
+var ambiguousCarriedResponse = new ConversationResponse
+{
+    NpcReply = "有，我拿一件给你看看。",
+    CarriedInventoryProposal = new CarriedInventoryProposal
+    {
+        Explicit = true,
+        Accepted = true
+    }
+};
+ConversationActionResolver.Normalize(ambiguousCarried, ambiguousCarriedResponse);
+Assert(!ambiguousCarriedResponse.CarriedInventoryProposal.Accepted,
+    "多件顾客随身物且没有唯一指定时不能擅自挑选");
+
+var wholesaleRequest = new ConversationRequest
+{
+    Scene = "store",
+    GameContext = new GameConversationContext
+    {
+        Trade = new NativeTradeContext
+        {
+            IsOfferWholesale = true,
+            WholesaleDiscountPercent = 20,
+            FinalOfferValue = 80
+        }
+    }
+};
+var wrongWholesale = new ConversationResponse { NpcReply = "批发按九折给你。" };
+ConversationActionResolver.Normalize(wholesaleRequest, wrongWholesale);
+Assert(wrongWholesale.NpcReply.Contains("收银台", StringComparison.Ordinal),
+    "人物报出与原版批发字段不符的折扣时应回退到收银台报价");
+var matchingWholesale = new ConversationResponse { NpcReply = "批发按八折给你。" };
+ConversationActionResolver.Normalize(wholesaleRequest, matchingWholesale);
+Assert(matchingWholesale.NpcReply.Contains("八折", StringComparison.Ordinal),
+    "人物报出与原版批发字段一致的折扣时应保留");
+var wrongWholesaleAmount = new ConversationResponse { NpcReply = "批发价70信用点。" };
+ConversationActionResolver.Normalize(wholesaleRequest, wrongWholesaleAmount);
+Assert(wrongWholesaleAmount.NpcReply.Contains("收银台", StringComparison.Ordinal),
+    "人物报出与原版收银台不符的批发金额时应回退到收银台报价");
+
+var departureReply = new ConversationResponse { NpcReply = "不买了。" };
+ConversationActionResolver.EnsureNaturalExitReply(storeRequest, departureReply);
+Assert(departureReply.NpcReply.Contains("先走", StringComparison.Ordinal),
+    "顾客离店回复缺少结束语时应补自然告别");
+var stayReply = new ConversationResponse { NpcReply = "我不走，我还要看看。" };
+ConversationActionResolver.EnsureNaturalExitReply(storeRequest, stayReply);
+Assert(stayReply.NpcReply == "我不走，我还要看看。",
+    "明确表示不离店时不能追加告别语");
+
 Assert(
     LocalFallbackEngine.IsCapturedItem(
         new NativeItemContext { Owner = "client", RuntimeKey = 99 },

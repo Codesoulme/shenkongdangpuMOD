@@ -222,6 +222,10 @@ public sealed class NativeTradeContext
     public int ClientSellPriceModifier { get; set; }
     [JsonPropertyName("client_impatience")]
     public int ClientImpatience { get; set; }
+    [JsonPropertyName("is_offer_wholesale")]
+    public bool IsOfferWholesale { get; set; }
+    [JsonPropertyName("wholesale_discount_percent")]
+    public int WholesaleDiscountPercent { get; set; }
     [JsonPropertyName("item")]
     public NativeItemContext? Item { get; set; }
     [JsonPropertyName("client_inventory_count")]
@@ -397,6 +401,12 @@ public sealed class CarriedInventoryProposal
     public bool Explicit { get; set; }
     [JsonPropertyName("accepted")]
     public bool Accepted { get; set; }
+    [JsonPropertyName("item_runtime_key")]
+    public int? ItemRuntimeKey { get; set; }
+    [JsonPropertyName("item_key")]
+    public string ItemKey { get; set; } = string.Empty;
+    [JsonPropertyName("item_name")]
+    public string ItemName { get; set; } = string.Empty;
     [JsonPropertyName("reason")]
     public string Reason { get; set; } = string.Empty;
 }

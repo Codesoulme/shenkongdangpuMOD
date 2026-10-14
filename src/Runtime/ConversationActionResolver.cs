@@ -24,9 +24,13 @@ internal static class ConversationActionResolver
 
         ResolveReturnVisit(request, response);
         ResolveCarriedInventory(request, response);
-        ResolveBarter(request, response);
+        if (response.BarterProposal.Explicit ||
+            ContainsAny(request.PlayerText ?? string.Empty,
+                "交换", "换你", "换这个", "换那个", "以物易物", "拿这个换", "用这个换"))
+            ResolveBarter(request, response);
         ResolveWalletTransfer(request, response);
         ResolveBarterValue(request, response);
+        NormalizeWholesaleReply(request, response);
     }
 
     public static bool ShouldDismissStoreClient(ConversationRequest request, ConversationResponse response)
@@ -47,6 +51,32 @@ internal static class ConversationActionResolver
         if (!request.Scene.Equals("phone", StringComparison.OrdinalIgnoreCase))
             return false;
         return ContainsDeparture(response.NpcReply, "挂了", "先挂", "结束通话", "通话结束", "下次再聊", "不打扰了", "再见", "拜拜");
+    }
+
+    public static void EnsureNaturalExitReply(
+        ConversationRequest request,
+        ConversationResponse response)
+    {
+        var isStoreExit = ShouldDismissStoreClient(request, response);
+        var isPhoneExit = ShouldHangUpPhone(request, response);
+        if (!isStoreExit && !isPhoneExit)
+            return;
+
+        var reply = (response.NpcReply ?? string.Empty).Trim();
+        var closing = isPhoneExit
+            ? "那我先挂了，下次再聊。"
+            : "那我先走了，回头再来。";
+        if (string.IsNullOrWhiteSpace(reply))
+        {
+            response.NpcReply = closing;
+            return;
+        }
+
+        if (!ContainsAny(reply,
+                "再见", "回头", "下次", "先走", "告辞", "拜拜", "挂了", "结束通话", "不打扰了"))
+        {
+            response.NpcReply = $"{reply.TrimEnd('。', '！', '!', '？', '?')}。{closing}";
+        }
     }
 
     private static void ResolveReturnVisit(ConversationRequest request, ConversationResponse response)
@@ -93,8 +123,76 @@ internal static class ConversationActionResolver
             proposal.Explicit = true;
         if (proposal.Explicit && !proposal.Accepted && IsAcceptedReply(reply))
             proposal.Accepted = true;
+        if (proposal.Accepted)
+        {
+            var candidates = request.GameContext.Trade.ClientCarriedItems
+                .Where(IsConfirmedCarriedItem)
+                .GroupBy(item => item.RuntimeKey)
+                .Select(group => group.First())
+                .ToList();
+            if (candidates.Count == 0)
+            {
+                proposal.Accepted = false;
+                proposal.Reason = "当前原版上下文没有可验证的顾客随身物品";
+            }
+            else
+            {
+                var selected = SelectCarriedItem(candidates, proposal);
+                if (selected is null)
+                {
+                    proposal.Accepted = false;
+                    proposal.Reason = candidates.Count > 1
+                        ? "顾客有多件随身物品，但没有唯一指定要展示哪一件"
+                        : "模型指定的随身物品不在当前顾客库存中";
+                }
+                else
+                {
+                    proposal.ItemRuntimeKey = selected.RuntimeKey;
+                    proposal.ItemKey = selected.ItemKey;
+                    proposal.ItemName = selected.DisplayName;
+                }
+            }
+        }
         if (proposal.Explicit && string.IsNullOrWhiteSpace(proposal.Reason))
             proposal.Reason = proposal.Accepted ? "人物同意展示随身货物" : "人物没有同意出售随身货物";
+    }
+
+    private static bool IsConfirmedCarriedItem(NativeItemContext item) =>
+        item.RuntimeKey > 0 &&
+        string.Equals(item.Owner, "client", StringComparison.OrdinalIgnoreCase);
+
+    private static NativeItemContext? SelectCarriedItem(
+        IReadOnlyList<NativeItemContext> candidates,
+        CarriedInventoryProposal proposal)
+    {
+        if (proposal.ItemRuntimeKey is > 0)
+            return candidates.SingleOrDefault(item => item.RuntimeKey == proposal.ItemRuntimeKey.Value);
+
+        var hasName = !string.IsNullOrWhiteSpace(proposal.ItemName);
+        var hasKey = !string.IsNullOrWhiteSpace(proposal.ItemKey);
+        if (hasName || hasKey)
+        {
+            var matches = candidates
+                .Where(item =>
+                    (hasName && SameItemText(item.DisplayName, proposal.ItemName)) ||
+                    (hasKey && (SameItemText(item.ItemKey, proposal.ItemKey) ||
+                                SameItemText(item.Identifier, proposal.ItemKey))))
+                .ToList();
+            return matches.Count == 1 ? matches[0] : null;
+        }
+
+        return candidates.Count == 1 ? candidates[0] : null;
+    }
+
+    private static bool SameItemText(string? left, string? right)
+    {
+        if (string.IsNullOrWhiteSpace(left) || string.IsNullOrWhiteSpace(right))
+            return false;
+        var a = left.Trim();
+        var b = right.Trim();
+        return a.Equals(b, StringComparison.OrdinalIgnoreCase) ||
+               a.Contains(b, StringComparison.OrdinalIgnoreCase) ||
+               b.Contains(a, StringComparison.OrdinalIgnoreCase);
     }
 
     private static void ResolveBarter(ConversationRequest request, ConversationResponse response)
@@ -105,7 +203,11 @@ internal static class ConversationActionResolver
 
         var playerText = request.PlayerText ?? string.Empty;
         var reply = response.NpcReply ?? string.Empty;
-        if (!proposal.Explicit && ContainsAny(playerText, "交换", "换你", "换这个", "换那个", "以物易物", "拿这个换", "用这个换"))
+        var barterIntent = proposal.Explicit ||
+                           ContainsAny(playerText, "交换", "换你", "换这个", "换那个", "以物易物", "拿这个换", "用这个换");
+        if (!barterIntent)
+            return;
+        if (!proposal.Explicit)
             proposal.Explicit = true;
         if (proposal.Explicit && !proposal.Accepted && IsAcceptedReply(reply))
             proposal.Accepted = true;
@@ -241,6 +343,120 @@ internal static class ConversationActionResolver
         if (string.IsNullOrWhiteSpace(proposal.ValueAssessment.Reason))
             proposal.ValueAssessment.Reason = check.Message;
     }
+
+    private static void NormalizeWholesaleReply(
+        ConversationRequest request,
+        ConversationResponse response)
+    {
+        var trade = request.GameContext.Trade;
+        if (!trade.IsOfferWholesale ||
+            string.IsNullOrWhiteSpace(response.NpcReply))
+            return;
+
+        var expectedDiscount = Math.Clamp(trade.WholesaleDiscountPercent, 0, 100);
+        var expectedFold = 100 - expectedDiscount;
+        var reply = response.NpcReply;
+        var ratioMismatch =
+            (TryReadFoldPercent(reply, out var fold) && fold != expectedFold) ||
+            (TryReadPercent(reply, out var percent) && percent != expectedDiscount);
+        var amountMismatch =
+            trade.FinalOfferValue is > 0 &&
+            TryReadCreditAmount(reply, out var amount) &&
+            amount != trade.FinalOfferValue.Value;
+        if (ratioMismatch || amountMismatch)
+        {
+            response.NpcReply = "按当前收银台的原版批发报价算，具体金额以收银台显示为准。";
+        }
+    }
+
+    private static bool TryReadCreditAmount(string value, out long amount)
+    {
+        amount = 0;
+        var marker = value.IndexOf("信用点", StringComparison.Ordinal);
+        if (marker < 0)
+            marker = value.IndexOf("点", StringComparison.Ordinal);
+        if (marker <= 0)
+            return false;
+
+        var end = marker;
+        var start = end - 1;
+        while (start >= 0 && char.IsDigit(value[start]))
+            start--;
+        return start < end - 1 &&
+               long.TryParse(value[(start + 1)..end], out amount);
+    }
+
+    private static bool TryReadPercent(string value, out int percent)
+    {
+        percent = 0;
+        for (var i = 0; i < value.Length; i++)
+        {
+            if (value[i] != '%')
+                continue;
+            var end = i;
+            var start = end - 1;
+            while (start >= 0 && char.IsDigit(value[start]))
+                start--;
+            if (start == end - 1)
+                continue;
+            if (int.TryParse(value[(start + 1)..end], out var parsed))
+            {
+                percent = parsed;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static bool TryReadFoldPercent(string value, out int fold)
+    {
+        fold = 0;
+        for (var i = 0; i < value.Length; i++)
+        {
+            if (value[i] != '折')
+                continue;
+
+            var end = i;
+            var start = end - 1;
+            while (start >= 0 && (char.IsDigit(value[start]) || IsChineseDigit(value[start])))
+                start--;
+            if (start == end - 1)
+                continue;
+
+            var token = value[(start + 1)..end];
+            if (int.TryParse(token, out var parsed))
+            {
+                fold = parsed <= 10 ? parsed * 10 : parsed;
+                return true;
+            }
+
+            var digits = token.Select(ToDigit).ToArray();
+            if (digits.All(x => x >= 0))
+            {
+                fold = digits.Length == 1 ? digits[0] * 10 : digits[^2] * 10 + digits[^1];
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static bool IsChineseDigit(char value) =>
+        value is '零' or '〇' or '一' or '二' or '两' or '三' or '四' or '五' or '六' or '七' or '八' or '九';
+
+    private static int ToDigit(char value) => value switch
+    {
+        '零' or '〇' => 0,
+        '一' => 1,
+        '二' or '两' => 2,
+        '三' => 3,
+        '四' => 4,
+        '五' => 5,
+        '六' => 6,
+        '七' => 7,
+        '八' => 8,
+        '九' => 9,
+        _ => -1
+    };
 
     private static bool IsAcceptedReply(string value)
     {
