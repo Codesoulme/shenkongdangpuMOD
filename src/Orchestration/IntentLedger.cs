@@ -60,8 +60,7 @@ public sealed class IntentLedger
             intent.WorldId = string.IsNullOrWhiteSpace(intent.WorldId) ? _worldId : intent.WorldId;
             intent.CreatedAtUtc = intent.CreatedAtUtc == default ? DateTime.UtcNow : intent.CreatedAtUtc;
             intent.UpdatedAtUtc = intent.CreatedAtUtc;
-            _intentsByDedup[intent.DeduplicationKey] = Clone(intent);
-            AppendLocked(new IntentLedgerEntry
+            var recorded = AppendLocked(new IntentLedgerEntry
             {
                 IntentId = intent.IntentId,
                 WorldId = intent.WorldId,
@@ -74,7 +73,9 @@ public sealed class IntentLedger
                 Summary = Clip(summary, 240),
                 Data = new Dictionary<string, string>(intent.Arguments, StringComparer.OrdinalIgnoreCase)
             });
-            return true;
+            if (recorded)
+                _intentsByDedup[intent.DeduplicationKey] = Clone(intent);
+            return recorded;
         }
     }
 
@@ -94,9 +95,7 @@ public sealed class IntentLedger
                 return false;
             }
 
-            current.Status = EchoWeaveIntentStatus.Executing;
-            current.UpdatedAtUtc = DateTime.UtcNow;
-            AppendLocked(new IntentLedgerEntry
+            if (!AppendLocked(new IntentLedgerEntry
             {
                 IntentId = current.IntentId,
                 WorldId = current.WorldId,
@@ -107,8 +106,12 @@ public sealed class IntentLedger
                 SnapshotRevision = current.SnapshotRevision,
                 Day = day,
                 Summary = "开始执行已登记动作。"
-            });
-            intent = Clone(current);
+            }))
+            {
+                intent = null;
+                return false;
+            }
+            intent = Clone(_intentsByDedup[deduplicationKey!]);
             return true;
         }
     }
@@ -124,12 +127,7 @@ public sealed class IntentLedger
         {
             if (!_intentsByDedup.TryGetValue(deduplicationKey ?? string.Empty, out var intent))
                 return false;
-            intent.Status = status;
-            intent.LastError = status is EchoWeaveIntentStatus.PermanentFailure or EchoWeaveIntentStatus.Conflict
-                ? Clip(summary, 240)
-                : string.Empty;
-            intent.UpdatedAtUtc = DateTime.UtcNow;
-            AppendLocked(new IntentLedgerEntry
+            return AppendLocked(new IntentLedgerEntry
             {
                 IntentId = intent.IntentId,
                 WorldId = intent.WorldId,
@@ -144,15 +142,14 @@ public sealed class IntentLedger
                     ? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
                     : new Dictionary<string, string>(data, StringComparer.OrdinalIgnoreCase)
             });
-            return true;
         }
     }
 
-    public void Append(IntentLedgerEntry entry)
+    public bool Append(IntentLedgerEntry entry)
     {
         ArgumentNullException.ThrowIfNull(entry);
         lock (_sync)
-            AppendLocked(entry);
+            return AppendLocked(entry);
     }
 
     public EchoWeaveRecoveryReport Recover()
@@ -205,10 +202,10 @@ public sealed class IntentLedger
         }
     }
 
-    private void AppendLocked(IntentLedgerEntry entry)
+    private bool AppendLocked(IntentLedgerEntry entry)
     {
         entry.WorldId = string.IsNullOrWhiteSpace(entry.WorldId) ? _worldId : entry.WorldId;
-        entry.Sequence = ++_sequence;
+        entry.Sequence = _sequence + 1;
         entry.CreatedAtUtc = entry.CreatedAtUtc == default ? DateTime.UtcNow : entry.CreatedAtUtc;
         entry.Data ??= new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
@@ -216,12 +213,15 @@ public sealed class IntentLedger
         {
             var line = JsonSerializer.Serialize(entry, EchoWeaveRuntime.JsonOptions(false));
             File.AppendAllText(_path, line + Environment.NewLine, Encoding.UTF8);
+            _sequence = entry.Sequence;
             _entries.Add(entry);
             ApplyEntry(entry);
+            return true;
         }
         catch
         {
             // Keep the in-memory game path alive if extension storage is unavailable.
+            return false;
         }
     }
 

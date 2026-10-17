@@ -6,6 +6,7 @@ namespace AIWorldPawnshop.Capabilities;
 public sealed class CapabilityDescriptor
 {
     public string CapabilityKey { get; init; } = string.Empty;
+    public string ImplementationStatus { get; init; } = "catalog_only";
     public string Version { get; init; } = "1.0";
     public string Title { get; init; } = string.Empty;
     public string Description { get; init; } = string.Empty;
@@ -210,21 +211,21 @@ public static class BuiltInCapabilityCatalog
         Register(registry, "social.task.create", "建立人物任务", EchoWeaveRiskLevel.R1ExtensionState,
             "登记一项可在后续安全时机继续处理的人物任务。", "world.read mod.tasks.write", "store phone");
         Register(registry, "visit.request.self", "登记本人回访", EchoWeaveRiskLevel.R2RecoverableNative,
-            "通过原版来客队列安排当前顾客未来回访。", "world.read mod.tasks.write native.visitor_queue.propose", "store");
+            "通过原版来客队列安排当前顾客未来回访。", "world.read mod.tasks.write native.visitor_queue.propose", "store", true);
         Register(registry, "visit.request.third_party", "申请第三方来访", EchoWeaveRiskLevel.R2RecoverableNative,
-            "在目标人物同意后申请未来来访候选。", "world.read mod.tasks.write native.visitor_queue.propose", "store phone");
+            "在目标人物同意后申请未来来访候选。", "world.read mod.tasks.write native.visitor_queue.propose", "store phone", true);
         Register(registry, "procurement.request.goods", "登记找货委托", EchoWeaveRiskLevel.R3SensitiveNative,
-            "按人物渠道登记未来找货委托。", "world.read mod.tasks.write native.inventory.propose", "store");
+            "按人物渠道登记未来找货委托。", "world.read mod.tasks.write native.inventory.propose", "store", true);
         Register(registry, "inventory.reveal.carried", "展示随身货物", EchoWeaveRiskLevel.R2RecoverableNative,
-            "读取并展示当前顾客的真实随身货物。", "world.read", "store");
+            "读取并展示当前顾客的真实随身货物。", "world.read", "store", true);
         Register(registry, "trade.adjust.selected", "调整指定报价", EchoWeaveRiskLevel.R2RecoverableNative,
-            "调用原版议价规则调整当前指定物品报价。", "world.read native.trade.propose", "store");
+            "调用原版议价规则调整当前指定物品报价。", "world.read native.trade.propose", "store", true);
         Register(registry, "trade.adjust.all", "调整整批报价", EchoWeaveRiskLevel.R2RecoverableNative,
-            "调用原版议价规则调整当前交易范围报价。", "world.read native.trade.propose", "store");
+            "调用原版议价规则调整当前交易范围报价。", "world.read native.trade.propose", "store", true);
         Register(registry, "barter.open.native", "打开原版交换", EchoWeaveRiskLevel.R3SensitiveNative,
-            "打开原版交换窗口，并等待原版最终确认。", "world.read native.barter.open", "store");
+            "打开原版交换窗口，并等待原版最终确认。", "world.read native.barter.open", "store", true);
         Register(registry, "wallet.transfer.native", "执行顾客预算转账", EchoWeaveRiskLevel.R3SensitiveNative,
-            "通过原版预算和现金接口完成顾客到玩家的明确补付。", "world.read native.wallet.transfer", "store");
+            "通过原版预算和现金接口完成顾客到玩家的明确补付。", "world.read native.wallet.transfer", "store", true);
         Register(registry, "memory.append.summary", "记录经历摘要", EchoWeaveRiskLevel.R1ExtensionState,
             "追加经过长度限制和去重的经历摘要。", "mod.memory.write", "store phone");
         Register(registry, "relationship.propose.change", "提出关系变化", EchoWeaveRiskLevel.R1ExtensionState,
@@ -243,11 +244,13 @@ public static class BuiltInCapabilityCatalog
         EchoWeaveRiskLevel risk,
         string description,
         string permissions,
-        string scenes)
+        string scenes,
+        bool implemented = false)
     {
         registry.Register(new DelegateWorldCapability(new CapabilityDescriptor
         {
             CapabilityKey = key,
+            ImplementationStatus = implemented ? "implemented" : "catalog_only",
             Title = title,
             Description = description,
             Tags = key.Split('.', StringSplitOptions.RemoveEmptyEntries).ToList(),

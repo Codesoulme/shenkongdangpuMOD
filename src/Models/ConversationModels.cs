@@ -551,4 +551,8 @@ public sealed class MemoryCandidate
     public string Summary { get; set; } = string.Empty;
     [JsonPropertyName("importance")]
     public double Importance { get; set; }
+    [JsonPropertyName("scope")]
+    public string Scope { get; set; } = "actor";
+    [JsonPropertyName("evidence")]
+    public string Evidence { get; set; } = string.Empty;
 }

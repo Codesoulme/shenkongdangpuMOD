@@ -20,6 +20,11 @@ try
     LedgerRejectsDuplicateAndSurvivesCorruptTail();
     RuntimeRecoversUnfinishedConversation();
     DuplicateConversationReplayFlow();
+    CrossSessionDeduplicationFlow();
+    ApprovedIntentResumeFlow();
+    PersistenceFailureFlow();
+    BackupRecoveryFlow();
+    FactVisibilityAndMemoryProvenanceFlow();
     StateRevisionIsMonotonic();
     GmModificationFlow();
     GmGoalPathSafetyFlow();
@@ -58,8 +63,17 @@ void RegistryContainsOnlyKnownCapabilities()
         "Procurement wrapper is missing.");
     Assert(procurement.Descriptor.RiskLevel == EchoWeaveRiskLevel.R3SensitiveNative,
         "Procurement risk should be R3.");
+    Assert(procurement.Descriptor.ImplementationStatus == "implemented" &&
+           registry.Describe("message.relay")?.Descriptor.ImplementationStatus == "catalog_only",
+        "目录占位能力被标成已接通执行器。");
     Assert(!registry.TryGet("runtime.compile.patch", out _),
         "Unknown runtime capability must not exist.");
+    var runtime = new EchoWeaveRuntime(Path.Combine(root, "capability-snapshot"), "cap-world");
+    var snapshot = runtime.Capture(new ConversationRequest { Scene = "store" },
+        new WorldState { WorldId = "cap-world" });
+    Assert(snapshot.ActiveCapabilities.Contains("visit.request.self") &&
+           !snapshot.ActiveCapabilities.Contains("message.relay"),
+        "未接通能力进入了当前可执行快照。");
 }
 
 void ThirdPartyCapabilityMappingFlow()
@@ -441,6 +455,18 @@ void GmGoalPathSafetyFlow()
     };
     Assert(!GmModificationEngine.Apply(state, new[] { mismatched }).Applied,
         "目标路径和字段错配时不应写入世界修正。");
+    var missingPath = new WorldModificationProposal
+    {
+        TargetKey = "global", Field = "price_modifier", Operation = "add",
+        Value = 0.1, DurationDays = 1, Evidence = "测试证据", Confidence = 0.9,
+        Goal = "reduce_store_loss"
+    };
+    Assert(!GmModificationEngine.Apply(state, new[] { missingPath }).Applied &&
+           state.ActiveModifications.Count == 0,
+        "缺少执行路径绕过了目标与路径的绑定校验。");
+    missingPath.Path = "price_modifier";
+    Assert(!GmModificationEngine.Apply(state, new[] { missingPath }).Applied,
+        "不相关目标借用价格路径绕过了目标目录。");
 }
 
 void DailyEventFlow()
@@ -1106,6 +1132,191 @@ void DuplicateConversationReplayFlow()
     Assert(!restarted.TryRecordConversation(snapshot, "重启后重复回复") &&
            restarted.Ledger.Entries.Count == entryCount,
         "重启后相同回合重新登记了执行。");
+}
+
+void CrossSessionDeduplicationFlow()
+{
+    var runtimeRoot = Path.Combine(root, "cross-session-dedup");
+    var state = new WorldState { WorldId = "stable-world", CurrentDay = 2 };
+    var request = new ConversationRequest
+    {
+        ConversationId = "stable-conversation", TurnId = 3,
+        CharacterKey = "client-one", Scene = "store"
+    };
+    var first = new EchoWeaveRuntime(runtimeRoot, state.WorldId);
+    var firstSnapshot = first.Capture(request, state);
+    Assert(first.TryRecordConversation(firstSnapshot, "首次执行"),
+        "稳定回合首次登记失败。");
+    Assert(first.CompleteConversation(firstSnapshot, EchoWeaveIntentStatus.Fulfilled, "完成"),
+        "首次回合未完成。");
+
+    var restarted = new EchoWeaveRuntime(runtimeRoot, state.WorldId);
+    var newSnapshot = restarted.Capture(request, state);
+    Assert(first.SessionId != restarted.SessionId &&
+           first.CreateDeduplicationKey(firstSnapshot, "conversation.record") ==
+           restarted.CreateDeduplicationKey(newSnapshot, "conversation.record") &&
+           !restarted.TryRecordConversation(newSnapshot, "重启后重复执行"),
+        "跨进程重启后同一对话回合被重新执行。");
+    request.TurnId++;
+    Assert(restarted.TryRecordConversation(restarted.Capture(request, state), "下一回合"),
+        "新回合被错误去重。");
+}
+
+void ApprovedIntentResumeFlow()
+{
+    var runtimeRoot = Path.Combine(root, "approved-intent-resume");
+    var state = new WorldState { WorldId = "resume-world", StateRevision = 2 };
+    var request = new ConversationRequest
+    {
+        ConversationId = "resume-conversation", TurnId = 1,
+        CharacterKey = "client", Scene = "store"
+    };
+    var first = new EchoWeaveRuntime(runtimeRoot, state.WorldId);
+    var snapshot = first.Capture(request, state);
+    var args = new Dictionary<string, string>
+    {
+        ["conversation_id"] = request.ConversationId,
+        ["character_key"] = request.CharacterKey,
+        ["scene"] = request.Scene
+    };
+    var key = first.CreateDeduplicationKey(snapshot, "conversation.record", args);
+    Assert(first.Ledger.TryPropose(new IntentRecord
+    {
+        WorldId = state.WorldId, SessionId = first.SessionId,
+        TurnId = request.TurnId, CapabilityKey = "conversation.record",
+        SnapshotRevision = state.StateRevision.ToString(),
+        DeduplicationKey = key, Status = EchoWeaveIntentStatus.Approved
+    }, "intent_approved", "已登记但未开始"),
+        "未能制造只登记未执行的恢复场景。");
+    var restarted = new EchoWeaveRuntime(runtimeRoot, state.WorldId);
+    Assert(restarted.TryRecordConversation(restarted.Capture(request, state), "继续执行") &&
+           restarted.Ledger.TryGetByDeduplicationKey(key, out var resumed) &&
+           resumed.Status == EchoWeaveIntentStatus.Executing,
+        "重启后安全的 Approved 意图未继续执行。");
+    Assert(!restarted.TryRecordConversation(restarted.Capture(request, state), "不能再执行"),
+        "正在执行的意图被重复启动。");
+}
+
+void PersistenceFailureFlow()
+{
+    var ledgerRoot = Path.Combine(root, "ledger-write-failure");
+    Directory.CreateDirectory(ledgerRoot);
+    Directory.CreateDirectory(Path.Combine(ledgerRoot, "EchoWeaveLedger.jsonl"));
+    var state = new WorldState { WorldId = "ledger-failure" };
+    var runtime = new EchoWeaveRuntime(ledgerRoot, state.WorldId);
+    var snapshot = runtime.Capture(new ConversationRequest
+    {
+        ConversationId = "failed-turn", TurnId = 1, CharacterKey = "client"
+    }, state);
+    Assert(!runtime.TryRecordConversation(snapshot, "不能落盘") &&
+           runtime.Ledger.Entries.Count == 0,
+        "账本落盘失败仍放行动作执行。");
+
+    var storeRoot = Path.Combine(root, "world-write-failure");
+    var store = new JsonFileStore(storeRoot);
+    var world = new WorldState { WorldId = "blocked" };
+    Directory.CreateDirectory(Path.Combine(storeRoot, "Worlds", "blocked.json.tmp"));
+    Assert(!store.SaveWorld(world), "世界保存失败仍返回成功。");
+}
+
+void BackupRecoveryFlow()
+{
+    var storeRoot = Path.Combine(root, "backup-recovery");
+    var store = new JsonFileStore(storeRoot);
+    var world = new WorldState { WorldId = "backup-world", CurrentDay = 4 };
+    Assert(store.SaveWorld(world), "初次世界保存失败。");
+    world.CurrentDay = 5;
+    Assert(store.SaveWorld(world), "二次世界保存失败。");
+    var path = Path.Combine(storeRoot, "Worlds", "backup-world.json");
+    File.WriteAllText(path, "{broken-json");
+    var recovered = store.LoadWorld(world.WorldId);
+    Assert(recovered.CurrentDay == 4, "损坏世界文件未从备份恢复。");
+    recovered.CurrentDay = 6;
+    Assert(store.SaveWorld(recovered) && store.LoadWorld(world.WorldId).CurrentDay == 6,
+        "恢复后保存覆盖了有效备份或未写入主文件。");
+}
+
+void FactVisibilityAndMemoryProvenanceFlow()
+{
+    var builder = typeof(WorldRuntime).Assembly.GetType(
+        "AIWorldPawnshop.Runtime.NativeConversationContextBuilder", throwOnError: true)!;
+    var visibleFacts = builder.GetMethod("SelectVisibleFacts")!;
+    var world = new WorldState { CurrentDay = 9 };
+    world.Facts.Add(new FactRecord
+    {
+        Day = 9, Summary = "王老板的私事", Visibility = "actor",
+        SubjectCharacterKey = "owner"
+    });
+    world.Facts.Add(new FactRecord
+    {
+        Day = 9, Summary = "王老板提到市场", Visibility = "actor",
+        SubjectCharacterKey = "other"
+    });
+    world.Facts.Add(new FactRecord
+    {
+        Day = 9, Summary = "公开市场事件", Visibility = "public"
+    });
+    var ownerFacts = (List<string>)visibleFacts.Invoke(null, new object[] { world, "owner" })!;
+    Assert(ownerFacts.Count == 2 && ownerFacts.Any(x => x.Contains("私事")) &&
+           !ownerFacts.Any(x => x.Contains("王老板提到市场")),
+        "私有事实按文本名字误共享给了其他人物。");
+
+    var runtime = new WorldRuntime(Path.Combine(root, "memory-provenance"));
+    var apply = typeof(WorldRuntime).GetMethod(
+        "ApplyConversationResult",
+        System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
+    var paraphrases = new[]
+    {
+        "请把货到的消息告诉你们整个阵营。",
+        "货到了，麻烦通知你们所有人。",
+        "你们那边都要知道，货已经到了。"
+    };
+    for (var i = 0; i < paraphrases.Length; i++)
+    {
+        var request = new ConversationRequest
+        {
+            ConversationId = "memory-turn", TurnId = i + 1,
+            CharacterKey = "merchant", PlayerText = paraphrases[i],
+            GameContext = new GameConversationContext
+            {
+                Character = new NativeCharacterContext
+                {
+                    Key = "merchant", FactionKey = "traders",
+                    IsNamedSpecialCharacter = true
+                }
+            }
+        };
+        var response = new ConversationResponse
+        {
+            NpcReply = "我会转告。",
+            MemoryCandidates = new List<MemoryCandidate>
+            {
+                new() { Summary = $"玩家第{i + 1}次要求通知阵营", Importance = 0.8,
+                    Scope = "faction", Evidence = paraphrases[i] },
+                new() { Summary = $"玩家第{i + 1}次私下闲聊", Importance = 0.6 },
+                new() { Summary = $"缺少来源的阵营传言{i}", Importance = 0.9,
+                    Scope = "faction", Evidence = "不存在的原话" }
+            }
+        };
+        apply.Invoke(runtime, new object[] { request, response });
+    }
+    var character = runtime.State.Characters["merchant"];
+    var faction = runtime.State.Factions["traders"];
+    Assert(character.Memories.Count == 9 && faction.Memories.Count == 3 &&
+           faction.Memories.All(x => x.SourceCharacterKey == "merchant" &&
+                                     x.SourceConversationId == "memory-turn" &&
+                                     !string.IsNullOrWhiteSpace(x.Evidence)),
+        "人物记忆来源缺失或私聊被错误传播到整个阵营。");
+    var priority = builder.GetMethod("MemoryPriority")!;
+    var fresh = (double)priority.Invoke(null, new object[]
+    {
+        new MemoryRecord { Importance = 0.8, CreatedDay = 9 }, 9
+    })!;
+    var old = (double)priority.Invoke(null, new object[]
+    {
+        new MemoryRecord { Importance = 0.8, CreatedDay = 2 }, 9
+    })!;
+    Assert(fresh > old, "旧记忆读取权重没有衰减。");
 }
 
 static void Assert(bool condition, string message)

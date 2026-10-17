@@ -271,31 +271,36 @@ public sealed class WorldRuntime
         {
             _store.Log(gmResult.Message);
             var economy = NativeWorldEconomyAdapter.ApplyCurrentClient(State);
-            if (economy.Applied && !economy.Verified)
+            var hasCurrentClient = PlayerStore.Instance?.currentClientInstance is not null;
+            if (hasCurrentClient && !economy.Verified)
                 _store.Log($"GM 经济修正未能写入当前原版来客：{economy.Message}");
             if (economy.Applied && economy.Verified)
                 NativeTradeAdapter.RefreshCurrentUi();
-            RecordWorldFact(
-                request,
-                "world_modification",
-                gmResult.Message + " " + economy.Message,
-                response.WorldModifications.Any(x =>
-                    string.IsNullOrWhiteSpace(x.TargetKey) ||
-                    x.TargetKey.Equals("global", StringComparison.OrdinalIgnoreCase))
-                    ? "public"
-                    : "actor");
+            if (!hasCurrentClient || economy.Verified)
+                RecordWorldFact(
+                    request,
+                    "world_modification",
+                    gmResult.Message + " " + economy.Message,
+                    response.WorldModifications.Any(x =>
+                        string.IsNullOrWhiteSpace(x.TargetKey) ||
+                        x.TargetKey.Equals("global", StringComparison.OrdinalIgnoreCase))
+                        ? "public"
+                        : "actor");
             _echoWeave.TryRecordWorldOutcome(
                 State.CurrentDay,
                 "world.modify",
                 $"{request.ConversationId}:{request.TurnId}",
                 gmResult.Message + " " + economy.Message,
-                !economy.Applied || economy.Verified
+                economy.Verified
                     ? EchoWeaveIntentStatus.Fulfilled
-                    : EchoWeaveIntentStatus.Conflict,
+                    : hasCurrentClient
+                        ? EchoWeaveIntentStatus.Conflict
+                        : EchoWeaveIntentStatus.Scheduled,
                 new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
                 {
                     ["proposal_count"] = response.WorldModifications.Count.ToString(),
-                    ["native_projection_verified"] = economy.Verified.ToString()
+                    ["native_projection_verified"] = economy.Verified.ToString(),
+                    ["native_client_present"] = hasCurrentClient.ToString()
                 });
         }
         var wallet = _capabilityAdapters.TransferWallet(request, response);
@@ -319,7 +324,8 @@ public sealed class WorldRuntime
                 Day = State.CurrentDay,
                 Kind = "native_wallet_transfer",
                 Summary = $"{request.CharacterDisplayName}：{wallet.Message}",
-                Visibility = "actor"
+                Visibility = "actor",
+                SubjectCharacterKey = request.CharacterKey
             });
             var walletSnapshot = _echoWeave.Capture(request, State);
             _echoWeave.TryRecordAdapterOutcome(
@@ -405,15 +411,16 @@ public sealed class WorldRuntime
             Day = State.CurrentDay,
             Kind = "conversation",
             Summary = $"玩家与 {request.CharacterKey} 进行了一轮{request.Scene}对话",
-            Visibility = "actor"
+            Visibility = "actor",
+            SubjectCharacterKey = request.CharacterKey
         });
         TrimFacts();
         State.TouchRevision();
-        _store.SaveWorld(State);
+        var saved = _store.SaveWorld(State);
         _echoWeave.CompleteConversation(
             snapshot,
-            EchoWeaveIntentStatus.Fulfilled,
-            "对话产生的扩展状态已写入。");
+            saved ? EchoWeaveIntentStatus.Fulfilled : EchoWeaveIntentStatus.Conflict,
+            saved ? "对话产生的扩展状态已写入。" : "扩展状态保存失败，不能视为持久化完成。");
         _echoWeave.Save();
     }
 
@@ -460,7 +467,8 @@ public sealed class WorldRuntime
                 Day = State.CurrentDay,
                 Kind = "third_party_decision",
                 Summary = pending.OutcomeSummary,
-                Visibility = "actor"
+                Visibility = "actor",
+                SubjectCharacterKey = request.CharacterKey
             });
             return pending;
         }
@@ -552,7 +560,8 @@ public sealed class WorldRuntime
             Day = State.CurrentDay,
             Kind = "third_party_contact",
             Summary = task.OutcomeSummary,
-            Visibility = "actor"
+            Visibility = "actor",
+            SubjectCharacterKey = request.CharacterKey
         });
         return task;
     }
@@ -743,7 +752,8 @@ public sealed class WorldRuntime
                 $"玩家通过交谈向 {request.CharacterDisplayName}（{request.CharacterKey}）提出 {result.Kind} {result.Percent}% 的议价，" +
                 $"范围 {result.Scope}，" +
                 result.Message,
-            Visibility = "actor"
+            Visibility = "actor",
+            SubjectCharacterKey = request.CharacterKey
         });
         TrimFacts();
         State.TouchRevision();
@@ -1222,16 +1232,25 @@ public sealed class WorldRuntime
             if (string.IsNullOrWhiteSpace(summary))
                 continue;
 
+            var evidence = candidate.Evidence?.Trim() ?? string.Empty;
+            var grounded = evidence.Length >= 2 &&
+                           (request.PlayerText.Contains(evidence, StringComparison.OrdinalIgnoreCase) ||
+                            response.NpcReply.Contains(evidence, StringComparison.OrdinalIgnoreCase));
+
             if (character is not null &&
                 !character.Memories.Any(x => x.Summary.Equals(summary, StringComparison.OrdinalIgnoreCase)))
             {
-                character.Memories.Add(CreateMemory(candidate, relationshipDelta));
+                character.Memories.Add(CreateMemory(
+                    request, characterKey, candidate, relationshipDelta,
+                    grounded ? evidence : request.PlayerText));
             }
 
-            if (faction is not null &&
+            if (faction is not null && grounded &&
+                candidate.Scope.Equals("faction", StringComparison.OrdinalIgnoreCase) &&
                 !faction.Memories.Any(x => x.Summary.Equals(summary, StringComparison.OrdinalIgnoreCase)))
             {
-                faction.Memories.Add(CreateMemory(candidate, relationshipDelta));
+                faction.Memories.Add(CreateMemory(
+                    request, characterKey, candidate, relationshipDelta, evidence));
             }
         }
 
@@ -1271,7 +1290,8 @@ public sealed class WorldRuntime
             Day = State.CurrentDay,
             Kind = kind,
             Summary = $"{speaker}：{summary.Trim()}",
-            Visibility = visibility
+            Visibility = visibility,
+            SubjectCharacterKey = request.CharacterKey
         });
         TrimFacts();
     }
@@ -1279,12 +1299,21 @@ public sealed class WorldRuntime
     private static string FirstNotBlank(params string?[] values) =>
         values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))?.Trim() ?? string.Empty;
 
-    private MemoryRecord CreateMemory(MemoryCandidate candidate, int relationshipDelta) => new()
+    private MemoryRecord CreateMemory(
+        ConversationRequest request,
+        string characterKey,
+        MemoryCandidate candidate,
+        int relationshipDelta,
+        string evidence) => new()
     {
         Kind = candidate.Kind,
         Summary = candidate.Summary.Trim()[..Math.Min(candidate.Summary.Trim().Length, 160)],
         CreatedDay = State.CurrentDay,
         Importance = Math.Clamp(candidate.Importance, 0, 1),
-        Valence = Math.Sign(relationshipDelta)
+        Valence = Math.Sign(relationshipDelta),
+        SourceCharacterKey = characterKey,
+        SourceConversationId = request.ConversationId,
+        SourceTurnId = request.TurnId,
+        Evidence = evidence[..Math.Min(evidence.Length, 160)]
     };
 }

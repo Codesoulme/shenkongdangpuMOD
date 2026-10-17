@@ -66,6 +66,10 @@ public sealed class MemoryRecord
     public int CreatedDay { get; set; }
     public double Importance { get; set; }
     public int Valence { get; set; }
+    public string SourceCharacterKey { get; set; } = string.Empty;
+    public string SourceConversationId { get; set; } = string.Empty;
+    public int SourceTurnId { get; set; }
+    public string Evidence { get; set; } = string.Empty;
 }
 
 public sealed class WorldEventState
@@ -106,6 +110,7 @@ public sealed class FactRecord
     public string Kind { get; set; } = string.Empty;
     public string Summary { get; set; } = string.Empty;
     public string Visibility { get; set; } = "private";
+    public string SubjectCharacterKey { get; set; } = string.Empty;
 }
 
 public sealed class NewsRecord

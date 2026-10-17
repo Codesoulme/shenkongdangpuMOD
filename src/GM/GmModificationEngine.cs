@@ -100,12 +100,15 @@ public static class GmModificationEngine
     private static bool TryValidate(WorldModificationProposal p, out string reason)
     {
         reason = string.Empty;
-        if (!string.IsNullOrWhiteSpace(p.Goal) && !string.IsNullOrWhiteSpace(p.Path) &&
-            !GmInterfaceCatalog.FindGoalPaths(p.Goal).Any(x => x.Path.Equals(p.Path, StringComparison.OrdinalIgnoreCase)))
+        if (string.IsNullOrWhiteSpace(p.TargetKey) ||
+            string.IsNullOrWhiteSpace(p.Goal) ||
+            string.IsNullOrWhiteSpace(p.Path) ||
+            string.IsNullOrWhiteSpace(p.Evidence))
+        { reason = "缺少目标、执行路径或证据"; return false; }
+        if (!GmInterfaceCatalog.FindGoalPaths(p.Goal).Any(x =>
+                x.Path.Equals(p.Path, StringComparison.OrdinalIgnoreCase)))
         { reason = "目标路径不在 GM 目录"; return false; }
-        if (!string.IsNullOrWhiteSpace(p.Goal) &&
-            !string.IsNullOrWhiteSpace(p.Path) &&
-            !GmInterfaceCatalog.IsExecutablePath(p.Path))
+        if (!GmInterfaceCatalog.IsExecutablePath(p.Path))
         { reason = "目标路径已发现但没有接通可验证执行器"; return false; }
         if (!Fields.Contains(p.Field) || !p.Operation.Equals("add", StringComparison.OrdinalIgnoreCase) && !p.Operation.Equals("replace", StringComparison.OrdinalIgnoreCase)) { reason = "字段或操作不在白名单"; return false; }
         if (p.Path is "price_modifier" or "demand_modifier" or "supply_modifier" &&

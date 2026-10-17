@@ -107,6 +107,9 @@ Unity 的 `Application.persistentDataPath` 对应目录。
 
 ## 未完成与待验证记录
 
+指导书 v1.1 的项目化接入方案、实现状态和验收边界见
+[`docs/GM_Integration_v1.1_Plan_zh-CN.md`](docs/GM_Integration_v1.1_Plan_zh-CN.md)。
+
 以下内容保留为后续工作，不视为当前版本已经完整交付：
 
 - 命名人物的跨天状态往返与冒认身份拦截已通过离线检查；原版剧情台词和说话方式仍需实机确认

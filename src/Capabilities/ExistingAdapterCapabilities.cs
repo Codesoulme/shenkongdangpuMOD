@@ -75,7 +75,9 @@ internal sealed class ExistingAdapterCapabilities
 
     private void Require(string capabilityKey)
     {
-        if (!_registry.TryGet(capabilityKey, out _))
-            throw new InvalidOperationException($"Capability is not registered: {capabilityKey}");
+        if (!_registry.TryGet(capabilityKey, out var capability) ||
+            !capability.Descriptor.ImplementationStatus.Equals(
+                "implemented", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException($"Capability has no native adapter: {capabilityKey}");
     }
 }

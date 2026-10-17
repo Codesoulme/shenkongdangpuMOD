@@ -35,7 +35,10 @@ public static class GmInterfaceCatalog
         new() { Goal = "reduce_store_loss", Path = "alarm_performance", Priority = 70, Requires = "alarm exists and performance write point verified", Fallback = "protection_service" },
         new() { Goal = "reduce_store_loss", Path = "protection_service", Priority = 60, Requires = "existing protection service active", Fallback = "security_text_only" },
         new() { Goal = "increase_supply", Path = "supply_modifier", Priority = 80, Requires = "category is known", Fallback = "procurement_request" },
-        new() { Goal = "change_prices", Path = "price_modifier", Priority = 70, Requires = "target category or global scope", Fallback = "demand_modifier" }
+        new() { Goal = "change_prices", Path = "price_modifier", Priority = 70, Requires = "target category or global scope", Fallback = "demand_modifier" },
+        new() { Goal = "change_prices", Path = "demand_modifier", Priority = 60, Requires = "known buyer demand target", Fallback = "none" },
+        new() { Goal = "change_demand", Path = "demand_modifier", Priority = 80, Requires = "known buyer demand target", Fallback = "none" },
+        new() { Goal = "change_supply", Path = "supply_modifier", Priority = 80, Requires = "known supply target", Fallback = "none" }
     };
 
     public static IReadOnlyList<GoalPath> FindGoalPaths(string goal) =>

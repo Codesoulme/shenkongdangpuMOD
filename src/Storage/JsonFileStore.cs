@@ -8,6 +8,7 @@ namespace AIWorldPawnshop.Storage;
 public sealed class JsonFileStore
 {
     private readonly string _root;
+    private readonly HashSet<string> _recoveredPaths = new(StringComparer.OrdinalIgnoreCase);
     private readonly JsonSerializerOptions _options = new()
     {
         WriteIndented = true,
@@ -66,9 +67,9 @@ public sealed class JsonFileStore
         return state;
     }
 
-    public void SaveWorld(WorldState state)
+    public bool SaveWorld(WorldState state)
     {
-        Save(GetWorldPath(state.WorldId), state);
+        return Save(GetWorldPath(state.WorldId), state);
     }
 
     public void Log(string message, Exception? exception = null)
@@ -77,7 +78,12 @@ public sealed class JsonFileStore
         if (exception is not null)
             line += Environment.NewLine + exception;
 
-        File.AppendAllText(Path.Combine(_root, "Logs", "mod.log"), line + Environment.NewLine);
+        try
+        {
+            File.AppendAllText(Path.Combine(_root, "Logs", "mod.log"), line + Environment.NewLine);
+        }
+        catch (IOException) { }
+        catch (UnauthorizedAccessException) { }
     }
 
     private string GetWorldPath(string worldId) =>
@@ -111,6 +117,7 @@ public sealed class JsonFileStore
             faction.FactionKey ??= string.Empty;
             faction.RecentChanges ??= new List<int>();
             faction.Memories ??= new List<MemoryRecord>();
+            NormalizeMemories(faction.Memories);
         }
 
         foreach (var character in state.Characters.Values.Where(x => x is not null))
@@ -121,6 +128,7 @@ public sealed class JsonFileStore
             character.OriginalRealName ??= string.Empty;
             character.FactionKey ??= string.Empty;
             character.Memories ??= new List<MemoryRecord>();
+            NormalizeMemories(character.Memories);
         }
 
         foreach (var worldEvent in state.ActiveEvents.Where(x => x is not null))
@@ -181,6 +189,22 @@ public sealed class JsonFileStore
             task.Status ??= "proposed";
             task.OutcomeSummary ??= string.Empty;
         }
+
+        foreach (var fact in state.Facts.Where(x => x is not null))
+        {
+            fact.Visibility ??= "private";
+            fact.SubjectCharacterKey ??= string.Empty;
+        }
+    }
+
+    private static void NormalizeMemories(IEnumerable<MemoryRecord> memories)
+    {
+        foreach (var memory in memories.Where(x => x is not null))
+        {
+            memory.SourceCharacterKey ??= string.Empty;
+            memory.SourceConversationId ??= string.Empty;
+            memory.Evidence ??= string.Empty;
+        }
     }
 
     private T? Read<T>(string path)
@@ -191,27 +215,59 @@ public sealed class JsonFileStore
         }
         catch (Exception ex)
         {
-            MelonLogger.Warning($"[当铺世界] 读取文件失败：{path}");
+            TryLogWarning($"[当铺世界] 读取文件失败：{path}");
             Log($"Read failed: {path}", ex);
-            return default;
+            var backup = path + ".bak";
+            if (!File.Exists(backup))
+                return default;
+            try
+            {
+                var recovered = JsonSerializer.Deserialize<T>(File.ReadAllText(backup), _options);
+                if (recovered is not null)
+                {
+                    _recoveredPaths.Add(path);
+                    Log($"Recovered from backup: {backup}");
+                }
+                return recovered;
+            }
+            catch (Exception backupError)
+            {
+                Log($"Backup read failed: {backup}", backupError);
+                return default;
+            }
         }
     }
 
-    private void Save<T>(string path, T value)
+    private bool Save<T>(string path, T value)
     {
         var temp = path + ".tmp";
         try
         {
             File.WriteAllText(temp, JsonSerializer.Serialize(value, _options));
-            if (File.Exists(path))
+            if (File.Exists(path) && !_recoveredPaths.Contains(path))
                 File.Copy(path, path + ".bak", true);
             File.Move(temp, path, true);
+            _recoveredPaths.Remove(path);
+            return true;
         }
         catch (Exception ex)
         {
-            MelonLogger.Error($"[当铺世界] 保存文件失败：{path}");
+            TryLogError($"[当铺世界] 保存文件失败：{path}");
             Log($"Write failed: {path}", ex);
             try { if (File.Exists(temp)) File.Delete(temp); } catch { }
+            return false;
         }
+    }
+
+    private static void TryLogWarning(string message)
+    {
+        try { MelonLogger.Warning(message); }
+        catch { }
+    }
+
+    private static void TryLogError(string message)
+    {
+        try { MelonLogger.Error(message); }
+        catch { }
     }
 }

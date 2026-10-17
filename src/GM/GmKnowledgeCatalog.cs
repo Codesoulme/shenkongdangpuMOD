@@ -17,7 +17,7 @@ public static class GmKnowledgeCatalog
             $"{x.Goal}=>{GmInterfaceCatalog.DescribeExecutableGoalPaths(x.Goal)}")),
         "可修改字段：GM 事件的 price_modifier、demand_modifier、supply_modifier；供给会进入找货成功率，价格和供需会在当前及后续原版来客生成时投影到 buyPriceModifier/sellPriceModifier；数值必须在 -0.50 到 0.50，duration_days=0 表示按对话语义永久生效，正数表示临时期限。",
         "不可修改：原版人物身份、物品表权重、任意库存数量、剧情变量、任意未知字段；金钱只能通过 wallet.transfer.native 从当前顾客已启用且余额足够的原版预算扣除并加入玩家现金；没有已验证接口的偷窃概率不能声称已改变。",
-        "提案必须包含 target_key、field、operation(add/replace)、value、duration_days、title、summary、evidence、confidence；证据不足时拒绝。",
+        "提案必须包含 goal、path、target_key、field、operation(add/replace)、value、duration_days、title、summary、evidence、confidence；goal 与 path 必须匹配已接通的目标目录，证据不足时拒绝。",
         "第三方联系：只有已经从原版 StoreClient 观察到的 OriginalIdentifier 才能写入 futurStoreClientIdQueue；Mod 的 canonical character key 不能直接当作原版来客标识。队列冲突时保持 proposed，不伪称已安排；目标到店后状态为 arrived，目标人物明确接受或拒绝后才变成 fulfilled 或 declined。",
         "已知人物目录：" + string.Join("；", state.Characters.Values
             .Where(x => !string.IsNullOrWhiteSpace(x.CharacterKey) ||

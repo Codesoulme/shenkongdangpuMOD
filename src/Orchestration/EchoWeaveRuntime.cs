@@ -70,6 +70,7 @@ public sealed class EchoWeaveRuntime
                 .Take(24)
                 .ToList() ?? new List<string>(),
             ActiveCapabilities = Capabilities.Search(null, request.Scene)
+                .Where(x => x.ImplementationStatus.Equals("implemented", StringComparison.OrdinalIgnoreCase))
                 .Select(x => x.CapabilityKey)
                 .ToList()
         };
@@ -90,7 +91,9 @@ public sealed class EchoWeaveRuntime
     {
         return EchoWeaveKeys.Create(
             snapshot.WorldId,
-            snapshot.SessionId,
+            string.IsNullOrWhiteSpace(snapshot.ConversationId)
+                ? snapshot.SessionId
+                : "conversation:" + snapshot.ConversationId.Trim(),
             snapshot.TurnId,
             capabilityKey,
             arguments);
@@ -104,7 +107,7 @@ public sealed class EchoWeaveRuntime
     {
         var arguments = ConversationArguments(snapshot);
         var key = CreateDeduplicationKey(snapshot, "conversation.record", arguments);
-        if (!_ledger.TryPropose(new IntentRecord
+        var proposed = _ledger.TryPropose(new IntentRecord
         {
             WorldId = snapshot.WorldId,
             SessionId = snapshot.SessionId,
@@ -117,7 +120,11 @@ public sealed class EchoWeaveRuntime
             IntentSummary = summary,
             Arguments = arguments,
             CreatedDay = snapshot.CurrentDay
-        }, "intent_approved", summary))
+        }, "intent_approved", summary);
+        if (!proposed &&
+            (!_ledger.TryGetByDeduplicationKey(key, out var pending) ||
+             pending.Status != EchoWeaveIntentStatus.Approved ||
+             pending.SnapshotRevision != snapshot.StateRevision.ToString()))
         {
             return false;
         }
@@ -214,7 +221,7 @@ public sealed class EchoWeaveRuntime
         // Keep it visible as a conflict and let the next conversation decide.
         foreach (var intent in report.OpenIntents)
         {
-            _ledger.Append(new IntentLedgerEntry
+            if (_ledger.Append(new IntentLedgerEntry
             {
                 IntentId = intent.IntentId,
                 WorldId = intent.WorldId,
@@ -225,10 +232,9 @@ public sealed class EchoWeaveRuntime
                 SnapshotRevision = intent.SnapshotRevision,
                 Day = state.CurrentDay,
                 Summary = "进程退出时动作未闭合，已标记为待重新核对，不自动重放。"
-            });
+            }))
+                report.RecoveredCount++;
         }
-
-        report.RecoveredCount = report.OpenIntents.Count;
         return report;
     }
 

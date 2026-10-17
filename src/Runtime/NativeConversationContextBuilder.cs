@@ -74,24 +74,9 @@ internal static class NativeConversationContextBuilder
                 })
                 .ToList();
 
-            // Feed back only public facts or facts that explicitly mention the
-            // current person. Private memories remain character-scoped; this
-            // is the small read-back seam that lets a later conversation react
-            // to a real native outcome without leaking another character's
-            // private dialogue.
-            var currentNames = new[]
-            {
-                context.Character.Key,
-                context.Character.DisplayName,
-                context.Character.OriginalIdentifier
-            }.Where(x => !string.IsNullOrWhiteSpace(x)).ToArray();
-            context.RecentWorldFacts = world.Facts
-                .Where(f => f.Visibility.Equals("public", StringComparison.OrdinalIgnoreCase) ||
-                            currentNames.Any(name => f.Summary.Contains(name, StringComparison.OrdinalIgnoreCase)))
-                .OrderByDescending(f => f.Day)
-                .Take(12)
-                .Select(f => $"第 {f.Day} 天：{f.Summary}")
-                .ToList();
+            // Private facts are keyed to the current actor, never inferred
+            // from a name appearing in another person's summary.
+            context.RecentWorldFacts = SelectVisibleFacts(world, context.Character.Key);
         }
         catch (Exception ex)
         {
@@ -928,7 +913,7 @@ internal static class NativeConversationContextBuilder
                 context.Character.IsNamedSpecialCharacter ? character.Relationship : null;
             context.Relationship.InteractionCount = character.InteractionCount;
             context.Relationship.MemorySummaries = character.Memories
-                .OrderByDescending(x => x.Importance)
+                .OrderByDescending(x => MemoryPriority(x, world.CurrentDay))
                 .ThenByDescending(x => x.CreatedDay)
                 .Take(8)
                 .Select(x => x.Summary)
@@ -942,7 +927,8 @@ internal static class NativeConversationContextBuilder
         {
             context.Relationship.ModFactionReputation = faction.Reputation;
             context.Relationship.FactionMemorySummaries = faction.Memories
-                .OrderByDescending(x => x.Importance)
+                .Where(x => !string.IsNullOrWhiteSpace(x.Evidence))
+                .OrderByDescending(x => MemoryPriority(x, world.CurrentDay))
                 .ThenByDescending(x => x.CreatedDay)
                 .Take(6)
                 .Select(x => x.Summary)
@@ -950,6 +936,21 @@ internal static class NativeConversationContextBuilder
                 .ToList();
         }
     }
+
+    public static List<string> SelectVisibleFacts(WorldState world, string characterKey) =>
+        world.Facts
+            .Where(f => f.Visibility.Equals("public", StringComparison.OrdinalIgnoreCase) ||
+                        (f.Visibility.Equals("actor", StringComparison.OrdinalIgnoreCase) &&
+                         !string.IsNullOrWhiteSpace(characterKey) &&
+                         f.SubjectCharacterKey.Equals(characterKey, StringComparison.OrdinalIgnoreCase)))
+            .OrderByDescending(f => f.Day)
+            .Take(12)
+            .Select(f => $"第 {f.Day} 天：{f.Summary}")
+            .ToList();
+
+    public static double MemoryPriority(MemoryRecord memory, int currentDay) =>
+        Math.Clamp(memory.Importance, 0, 1) *
+        Math.Pow(0.9, Math.Max(0, currentDay - memory.CreatedDay) / 7d);
 
     private static bool IsOpenThirdPartyStatus(string status) =>
         status.Equals("accepted", StringComparison.OrdinalIgnoreCase) ||
