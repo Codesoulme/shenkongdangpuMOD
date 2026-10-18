@@ -266,7 +266,31 @@ public sealed class WorldRuntime
         }
 
         ConversationActionResolver.Normalize(request, response);
+        var hasWorldModificationProposal = response.WorldModifications.Count > 0;
+        var worldGateReason = string.Empty;
+        var worldGateOpened = !hasWorldModificationProposal ||
+                              _echoWeave.TryBeginCapability(
+                                  snapshot,
+                                  "world.modify",
+                                  "登记 GM 世界数值修正",
+                                  reason: out worldGateReason);
+        if (!worldGateOpened && hasWorldModificationProposal)
+        {
+            response.WorldModifications.Clear();
+            MelonLogger.Warning($"[当铺世界] GM 世界修正未通过执行闸门：{worldGateReason}");
+        }
+
         var gmResult = GmModificationEngine.Apply(State, response.WorldModifications);
+        if (hasWorldModificationProposal && !gmResult.Applied)
+        {
+            _echoWeave.TryRecordAdapterOutcome(
+                snapshot,
+                "world.modify",
+                string.IsNullOrWhiteSpace(worldGateReason)
+                    ? gmResult.Message
+                    : worldGateReason,
+                EchoWeaveIntentStatus.Rejected);
+        }
         if (gmResult.Applied)
         {
             _store.Log(gmResult.Message);
@@ -302,7 +326,37 @@ public sealed class WorldRuntime
                     ["native_projection_verified"] = economy.Verified.ToString(),
                     ["native_client_present"] = hasCurrentClient.ToString()
                 });
+            _echoWeave.TryRecordAdapterOutcome(
+                snapshot,
+                "world.modify",
+                gmResult.Message + " " + economy.Message,
+                economy.Verified
+                    ? EchoWeaveIntentStatus.Fulfilled
+                    : hasCurrentClient
+                        ? EchoWeaveIntentStatus.Conflict
+                        : EchoWeaveIntentStatus.Scheduled);
         }
+        var walletGateReason = string.Empty;
+        var walletGateOpened = !response.WalletTransfer.Explicit ||
+                               !response.WalletTransfer.Accepted ||
+                               _echoWeave.TryBeginCapability(
+                                   snapshot,
+                                   "wallet.transfer.native",
+                                   $"登记顾客补付 {response.WalletTransfer.Amount} 信用点",
+                                   reason: out walletGateReason,
+                                   arguments: new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                                   {
+                                       ["amount"] = response.WalletTransfer.Amount.ToString(
+                                           System.Globalization.CultureInfo.InvariantCulture)
+                                   },
+                                   timing: EchoWeaveSafeTiming.NativeTransactionConfirmed);
+        if (!walletGateOpened && response.WalletTransfer.Explicit && response.WalletTransfer.Accepted)
+        {
+            response.WalletTransfer.Accepted = false;
+            response.WalletTransfer.Reason = walletGateReason;
+            MelonLogger.Warning($"[当铺世界] 顾客补付未通过执行闸门：{walletGateReason}");
+        }
+
         var wallet = _capabilityAdapters.TransferWallet(request, response);
         if (response.BarterProposal.Explicit &&
             response.BarterProposal.Accepted &&
@@ -344,10 +398,71 @@ public sealed class WorldRuntime
         }
         var procurementResolution = ProcurementRequestResolver.Resolve(request, response);
         ApplyConversationResult(request, response);
+        var thirdPartyGateReason = string.Empty;
+        var thirdPartyGateOpened = !response.ThirdPartyTask.Explicit ||
+                                   !response.ThirdPartyTask.Accepted ||
+                                   _echoWeave.TryBeginCapability(
+                                       snapshot,
+                                       "visit.request.third_party",
+                                       "登记第三方人物联系",
+                                       timing: EchoWeaveSafeTiming.AfterDialogue,
+                                       reason: out thirdPartyGateReason);
+        if (!thirdPartyGateOpened && response.ThirdPartyTask.Explicit && response.ThirdPartyTask.Accepted)
+        {
+            response.ThirdPartyTask.Accepted = false;
+            response.ThirdPartyTask.Reason = thirdPartyGateReason;
+            response.NpcReply = ThirdPartyUnavailableReply;
+            MelonLogger.Warning($"[当铺世界] 第三方联系未通过执行闸门：{thirdPartyGateReason}");
+        }
+
         var thirdPartyTask = ApplyThirdPartyTask(request, response);
+        var returnVisitGateReason = string.Empty;
+        var returnVisitGateOpened = !response.ReturnVisitProposal.Explicit ||
+                                    !response.ReturnVisitProposal.Accepted ||
+                                    _echoWeave.TryBeginCapability(
+                                        snapshot,
+                                        "visit.request.self",
+                                        "登记当前顾客回访",
+                                        timing: EchoWeaveSafeTiming.AfterDialogue,
+                                        reason: out returnVisitGateReason);
+        if (!returnVisitGateOpened && response.ReturnVisitProposal.Explicit && response.ReturnVisitProposal.Accepted)
+        {
+            response.ReturnVisitProposal.Accepted = false;
+            response.ReturnVisitProposal.Reason = returnVisitGateReason;
+            MelonLogger.Warning($"[当铺世界] 回访未通过执行闸门：{returnVisitGateReason}");
+        }
+
         var returnVisit = _capabilityAdapters.RequestReturnVisit(State, request, response);
         if (returnVisit.Proposed && !returnVisit.Scheduled)
             MelonLogger.Warning($"[当铺世界] 回访未登记：{returnVisit.Message}");
+        var procurementGateReason = string.Empty;
+        var procurementGateOpened = !procurementResolution.Explicit ||
+                                    !procurementResolution.Accepted ||
+                                    _echoWeave.TryBeginCapability(
+                                        snapshot,
+                                        "procurement.request.goods",
+                                        $"登记找货委托 {procurementResolution.Category}",
+                                        timing: EchoWeaveSafeTiming.AfterDialogue,
+                                        reason: out procurementGateReason);
+        if (!procurementGateOpened && procurementResolution.Explicit && procurementResolution.Accepted)
+        {
+            procurementResolution = new ProcurementResolution
+            {
+                Explicit = procurementResolution.Explicit,
+                Accepted = false,
+                Category = procurementResolution.Category,
+                RequestedDescription = procurementResolution.RequestedDescription,
+                DueInDays = procurementResolution.DueInDays,
+                PromisedPremiumPercent = procurementResolution.PromisedPremiumPercent,
+                AccessLevel = procurementResolution.AccessLevel,
+                MaxRarityTier = procurementResolution.MaxRarityTier,
+                AccessSearchModifier = procurementResolution.AccessSearchModifier,
+                AccessReason = procurementResolution.AccessReason,
+                Reason = procurementGateReason
+            };
+            MelonLogger.Warning($"[当铺世界] 找货委托未通过执行闸门：{procurementGateReason}");
+        }
+
         var procurement = _capabilityAdapters.RequestGoods(
             State,
             request,
@@ -377,10 +492,10 @@ public sealed class WorldRuntime
                 procurement.Scheduled
                     ? EchoWeaveIntentStatus.Scheduled
                     : EchoWeaveIntentStatus.Rejected,
-                new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-                {
-                    ["request_key"] = procurement.RequestKey
-                });
+                // The gate opens before the native request key is allocated;
+                // keep the completion key stable and retain the request key
+                // in the human-readable receipt above.
+                null);
         }
         if (response.ThirdPartyTask.Explicit)
         {
@@ -399,12 +514,7 @@ public sealed class WorldRuntime
                 thirdPartyTask?.OutcomeSummary ??
                 FirstNotBlank(response.ThirdPartyTask.Reason, "第三方联系未通过可执行条件。"),
                 intentStatus,
-                new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-                {
-                    ["task_key"] = thirdPartyTask?.TaskKey ?? string.Empty,
-                    ["target_key"] = response.ThirdPartyTask.TargetCharacterKey,
-                    ["status"] = status
-                });
+                null);
         }
         State.Facts.Add(new FactRecord
         {
@@ -689,6 +799,23 @@ public sealed class WorldRuntime
         ConversationRequest request,
         ConversationResponse response)
     {
+        var barterGateReason = string.Empty;
+        var barterGateOpened = !response.BarterProposal.Explicit ||
+                               !response.BarterProposal.Accepted ||
+                               _echoWeave.TryBeginCapability(
+                                   _echoWeave.Capture(request, State),
+                                   "barter.open.native",
+                                   "登记原版物品交换",
+                                   timing: EchoWeaveSafeTiming.TradeUiReady,
+                                   reason: out barterGateReason);
+        if (!barterGateOpened && response.BarterProposal.Explicit && response.BarterProposal.Accepted)
+        {
+            response.BarterProposal.Accepted = false;
+            response.BarterProposal.Reason = barterGateReason;
+            response.NpcReply = ConversationActionResolver.NaturalBarterFailureReply;
+            MelonLogger.Warning($"[当铺世界] 交换未通过执行闸门：{barterGateReason}");
+        }
+
         var barter = _capabilityAdapters.OpenBarter(request, response);
         // The character model may have agreed before the native adapter
         // revalidated live ownership.  Do not leave an affirmative reply in
@@ -704,7 +831,25 @@ public sealed class WorldRuntime
             MelonLogger.Msg($"[当铺世界] 交换对话：{barter.Message}");
         if (barter.Proposed)
             RecordWorldFact(request, "native_barter", barter.Message, "actor");
-        var carried = barter.Applied
+        var carriedGateReason = string.Empty;
+        var carriedGateOpened = !barter.Applied &&
+                                (!response.CarriedInventoryProposal.Explicit ||
+                                 !response.CarriedInventoryProposal.Accepted ||
+                                 _echoWeave.TryBeginCapability(
+                                     _echoWeave.Capture(request, State),
+                                     "inventory.reveal.carried",
+                                     "登记展示顾客随身货物",
+                                     timing: EchoWeaveSafeTiming.AfterDialogue,
+                                     reason: out carriedGateReason));
+        if (!carriedGateOpened && response.CarriedInventoryProposal.Explicit && response.CarriedInventoryProposal.Accepted)
+        {
+            response.CarriedInventoryProposal.Accepted = false;
+            response.CarriedInventoryProposal.Reason = carriedGateReason;
+            response.NpcReply = "抱歉，那件东西现在拿不出来，先别把它算进交易。";
+            MelonLogger.Warning($"[当铺世界] 随身货物展示未通过执行闸门：{carriedGateReason}");
+        }
+
+        var carried = barter.Applied || !carriedGateOpened
             ? new CarriedInventoryApplication()
             : _capabilityAdapters.RevealCarriedInventory(State, request, response);
         if (!barter.Proposed && carried.Proposed &&
@@ -726,7 +871,7 @@ public sealed class WorldRuntime
                 snapshot,
                 "barter.open.native",
                 barter.Message,
-                barter.Applied ? EchoWeaveIntentStatus.Approved : EchoWeaveIntentStatus.Rejected);
+                barter.Applied ? EchoWeaveIntentStatus.Scheduled : EchoWeaveIntentStatus.Rejected);
         if (carried.Proposed)
             _echoWeave.TryRecordAdapterOutcome(
                 snapshot,
@@ -740,9 +885,51 @@ public sealed class WorldRuntime
         ConversationRequest request,
         ConversationResponse response)
     {
+        var requestedTradeScope = response.TradeProposal.Scope;
+        if (string.IsNullOrWhiteSpace(requestedTradeScope) ||
+            requestedTradeScope.Equals(BargainScopes.Unspecified, StringComparison.OrdinalIgnoreCase))
+        {
+            requestedTradeScope = BargainScopeResolver.Resolve(request.PlayerText, 1).Scope;
+        }
+        var tradeCapabilityKey = requestedTradeScope.Equals(
+            BargainScopes.AllCurrentAndFuture,
+            StringComparison.OrdinalIgnoreCase)
+            ? "trade.adjust.all"
+            : "trade.adjust.selected";
+
+        if (response.TradeProposal.Explicit)
+        {
+            var gateReason = string.Empty;
+            if (!_echoWeave.TryBeginCapability(
+                    _echoWeave.Capture(request, State),
+                    tradeCapabilityKey,
+                    "登记原版议价调整",
+                    timing: EchoWeaveSafeTiming.TradeUiReady,
+                    reason: out gateReason))
+            {
+                MelonLogger.Warning($"[当铺世界] 议价未通过执行闸门：{gateReason}");
+                return new NativeTradeApplication
+                {
+                    Proposed = true,
+                    Invoked = false,
+                    Message = gateReason
+                };
+            }
+        }
+
         var result = _capabilityAdapters.AdjustTrade(request, response);
         if (!result.Invoked)
+        {
+            if (result.Proposed)
+            {
+                _echoWeave.TryRecordAdapterOutcome(
+                    _echoWeave.Capture(request, State),
+                    tradeCapabilityKey,
+                    result.Message,
+                    EchoWeaveIntentStatus.Rejected);
+            }
             return result;
+        }
 
         State.Facts.Add(new FactRecord
         {
@@ -761,16 +948,10 @@ public sealed class WorldRuntime
         var snapshot = _echoWeave.Capture(request, State);
         _echoWeave.TryRecordAdapterOutcome(
             snapshot,
-            result.Scope.Equals(BargainScopes.AllCurrentAndFuture, StringComparison.OrdinalIgnoreCase)
-                ? "trade.adjust.all"
-                : "trade.adjust.selected",
+            tradeCapabilityKey,
             result.Message,
             result.Accepted ? EchoWeaveIntentStatus.Fulfilled : EchoWeaveIntentStatus.Rejected,
-            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-            {
-                ["scope"] = result.Scope,
-                ["percent"] = result.Percent.ToString(System.Globalization.CultureInfo.InvariantCulture)
-            });
+            null);
         _echoWeave.Save();
         return result;
     }

@@ -226,6 +226,8 @@ public static class BuiltInCapabilityCatalog
             "打开原版交换窗口，并等待原版最终确认。", "world.read native.barter.open", "store", true);
         Register(registry, "wallet.transfer.native", "执行顾客预算转账", EchoWeaveRiskLevel.R3SensitiveNative,
             "通过原版预算和现金接口完成顾客到玩家的明确补付。", "world.read native.wallet.transfer", "store", true);
+        Register(registry, "world.modify", "提交世界数值修正", EchoWeaveRiskLevel.R1ExtensionState,
+            "通过 GM 数值执行器写入已验证的供需或价格修正。", "world.read mod.world.write", "store", true);
         Register(registry, "memory.append.summary", "记录经历摘要", EchoWeaveRiskLevel.R1ExtensionState,
             "追加经过长度限制和去重的经历摘要。", "mod.memory.write", "store phone");
         Register(registry, "relationship.propose.change", "提出关系变化", EchoWeaveRiskLevel.R1ExtensionState,

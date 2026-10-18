@@ -152,6 +152,27 @@ public sealed class EchoWeaveRuntime
         IReadOnlyDictionary<string, string>? arguments = null)
     {
         var key = CreateDeduplicationKey(snapshot, capabilityKey, arguments);
+
+        // A live action is normally pre-registered through
+        // TryBeginCapability. Complete that same ledger record instead of
+        // appending a second proposal after the native call. The fallback
+        // proposal path keeps compatibility with older callers and with
+        // cross-day records that have no live execution phase.
+        if (_ledger.TryGetByDeduplicationKey(key, out var existing))
+        {
+            if (existing.Status is not EchoWeaveIntentStatus.Fulfilled and
+                not EchoWeaveIntentStatus.Rejected and
+                not EchoWeaveIntentStatus.Conflict and
+                not EchoWeaveIntentStatus.PermanentFailure and
+                not EchoWeaveIntentStatus.Expired and
+                not EchoWeaveIntentStatus.Scheduled)
+            {
+                return _ledger.Complete(key, status, snapshot.CurrentDay, summary);
+            }
+
+            return false;
+        }
+
         return _ledger.TryPropose(new IntentRecord
         {
             WorldId = snapshot.WorldId,
@@ -168,6 +189,96 @@ public sealed class EchoWeaveRuntime
                 : new Dictionary<string, string>(arguments, StringComparer.OrdinalIgnoreCase),
             CreatedDay = snapshot.CurrentDay
         }, "adapter_outcome", summary);
+    }
+
+    /// <summary>
+    /// Opens the single commit gate used by native adapters. A capability must
+    /// be present in the directory, marked implemented, pass its local check,
+    /// and be durably recorded before the caller is allowed to touch the game.
+    /// </summary>
+    public bool TryBeginCapability(
+        EchoWeaveSnapshot snapshot,
+        string capabilityKey,
+        string summary,
+        out string reason,
+        IReadOnlyDictionary<string, string>? arguments = null,
+        EchoWeaveSafeTiming timing = EchoWeaveSafeTiming.AfterDialogue)
+    {
+        reason = string.Empty;
+        if (!Capabilities.TryGet(capabilityKey, out var capability) ||
+            !capability.Descriptor.ImplementationStatus.Equals(
+                "implemented", StringComparison.OrdinalIgnoreCase))
+        {
+            reason = $"能力未接通：{capabilityKey}";
+            return false;
+        }
+
+        if (capability.Descriptor.SupportedScenes.Count > 0 &&
+            !capability.Descriptor.SupportedScenes.Any(scene =>
+                scene.Equals(snapshot.Scene, StringComparison.OrdinalIgnoreCase)))
+        {
+            reason = $"当前场景不支持能力：{capabilityKey}";
+            return false;
+        }
+
+        var invocation = new CapabilityInvocation
+        {
+            CapabilityKey = capabilityKey,
+            CapabilityVersion = capability.Descriptor.Version,
+            Arguments = arguments is null
+                ? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                : new Dictionary<string, string>(arguments, StringComparer.OrdinalIgnoreCase),
+            DeduplicationKey = CreateDeduplicationKey(snapshot, capabilityKey, arguments)
+        };
+        var check = capability.Check(invocation, snapshot);
+        if (!check.Allowed)
+        {
+            reason = string.IsNullOrWhiteSpace(check.Reason)
+                ? "能力前置条件未满足"
+                : check.Reason;
+            return false;
+        }
+
+        if (_ledger.TryGetByDeduplicationKey(invocation.DeduplicationKey, out var existing))
+        {
+            if (existing.Status is EchoWeaveIntentStatus.Approved or EchoWeaveIntentStatus.Ready)
+            {
+                if (_ledger.TryBeginExecution(
+                        invocation.DeduplicationKey, snapshot.CurrentDay, out _))
+                    return true;
+            }
+
+            reason = existing.Status is EchoWeaveIntentStatus.Fulfilled
+                or EchoWeaveIntentStatus.Scheduled
+                ? "同一动作已经完成"
+                : "同一动作已经登记，等待原版回执";
+            return false;
+        }
+
+        var proposed = _ledger.TryPropose(new IntentRecord
+        {
+            WorldId = snapshot.WorldId,
+            SessionId = snapshot.SessionId,
+            TurnId = snapshot.TurnId,
+            CapabilityKey = capabilityKey,
+            CapabilityVersion = capability.Descriptor.Version,
+            SnapshotRevision = snapshot.StateRevision.ToString(),
+            Status = EchoWeaveIntentStatus.Approved,
+            RiskLevel = capability.Descriptor.RiskLevel,
+            SafeTiming = check.RequiredTiming ?? timing,
+            DeduplicationKey = invocation.DeduplicationKey,
+            IntentSummary = summary,
+            Arguments = invocation.Arguments,
+            CreatedDay = snapshot.CurrentDay
+        }, "capability_approved", summary);
+        if (!proposed || !_ledger.TryBeginExecution(
+                invocation.DeduplicationKey, snapshot.CurrentDay, out _))
+        {
+            reason = "动作登记失败，未调用原版接口";
+            return false;
+        }
+
+        return true;
     }
 
     /// <summary>

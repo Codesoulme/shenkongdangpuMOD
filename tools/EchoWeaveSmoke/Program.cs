@@ -16,6 +16,7 @@ Directory.CreateDirectory(root);
 try
 {
     RegistryContainsOnlyKnownCapabilities();
+    CapabilityCommitGateFlow();
     DeduplicationKeyIsStable();
     LedgerRejectsDuplicateAndSurvivesCorruptTail();
     RuntimeRecoversUnfinishedConversation();
@@ -58,7 +59,7 @@ finally
 void RegistryContainsOnlyKnownCapabilities()
 {
     var registry = BuiltInCapabilityCatalog.Create();
-    Assert(registry.Count == 16, $"Expected 16 capabilities, got {registry.Count}.");
+    Assert(registry.Count == 17, $"Expected 17 capabilities, got {registry.Count}.");
     Assert(registry.TryGet("procurement.request.goods", out var procurement),
         "Procurement wrapper is missing.");
     Assert(procurement.Descriptor.RiskLevel == EchoWeaveRiskLevel.R3SensitiveNative,
@@ -94,6 +95,61 @@ void ThirdPartyCapabilityMappingFlow()
         "第三方接口目录的执行键没有绑定到已注册能力。");
     Assert(capability.Descriptor.CapabilityKey == "visit.request.third_party",
         "第三方接口映射到了错误的能力。");
+}
+
+void CapabilityCommitGateFlow()
+{
+    var gateRoot = Path.Combine(root, "capability-gate");
+    var runtime = new EchoWeaveRuntime(gateRoot, "gate-world");
+    var state = new WorldState { WorldId = "gate-world", CurrentDay = 2 };
+    var snapshot = runtime.Capture(new ConversationRequest
+    {
+        ConversationId = "gate-conversation",
+        TurnId = 1,
+        Scene = "store",
+        CharacterKey = "client-gate"
+    }, state);
+
+    Assert(!runtime.TryBeginCapability(
+            snapshot,
+            "message.relay",
+            "不应执行目录占位能力",
+            out var catalogOnlyReason),
+        "目录占位能力不应通过执行闸门。");
+    Assert(catalogOnlyReason.Contains("未接通", StringComparison.Ordinal),
+        "目录占位能力拒绝时应说明未接通原因。");
+
+    Assert(runtime.TryBeginCapability(
+            snapshot,
+            "visit.request.self",
+            "登记一次回访",
+            out var beginReason),
+        $"已接通能力未能登记执行：{beginReason}");
+    Assert(runtime.Ledger.Entries.Any(x =>
+            x.CapabilityKey == "visit.request.self" &&
+            x.Status == EchoWeaveIntentStatus.Executing),
+        "能力执行前没有写入 executing 回执。");
+    Assert(!runtime.TryBeginCapability(
+            snapshot,
+            "visit.request.self",
+            "重复登记回访",
+            out _),
+        "同一能力回合不能重复进入执行。");
+    Assert(runtime.TryRecordAdapterOutcome(
+            snapshot,
+            "visit.request.self",
+            "原版回访队列已确认",
+            EchoWeaveIntentStatus.Scheduled),
+        "原版回执没有闭合预登记动作。");
+    Assert(runtime.Ledger.Entries.Count(x =>
+            x.CapabilityKey == "visit.request.self") == 3,
+        "预登记、开始和完成应形成一条动作轨迹。");
+    Assert(!runtime.TryRecordAdapterOutcome(
+            snapshot,
+            "visit.request.self",
+            "重复回执不应再次写入",
+            EchoWeaveIntentStatus.Scheduled),
+        "已完成能力不应接受重复回执。");
 }
 
 void WorldOutcomeLedgerFlow()

@@ -1,6 +1,6 @@
 # 当铺世界 Mod 架构图
 
-适用版本：Mod 0.2.2 / Probably Stolen Demo 0.46D。本图描述当前代码的运行路径，不是未来功能规划。
+适用版本：Mod 0.2.6 / Probably Stolen Demo 0.46D。本图描述当前代码的运行路径，不是未来功能规划。
 
 ```mermaid
 flowchart TD
@@ -20,6 +20,7 @@ flowchart TD
     GM["GM 复核结果：世界修正与特定提案"]
     FALLBACK["接口失败时的本地回复"]
     CHECK["身份、快照时效、提案范围与能力校验"]
+    GATE["统一提交闸门：目录接通、场景、前置条件、账本登记"]
     ADAPTER["原版适配器：议价、交换、预算、找货、回访等"]
     WORLD["GM 受限修正：价格、需求、供给"]
     STORE["配置与世界状态 JSON；意图账本 JSONL"]
@@ -37,7 +38,7 @@ flowchart TD
     PERSON_CALL -- 请求失败 --> FALLBACK --> CHECK
     DECISION -- 是，追加调用 --> GM_CALL --> GM --> CHECK
     DECISION -- 否 --> CHECK
-    CHECK --> ADAPTER --> GAME
+    CHECK --> GATE --> ADAPTER --> GAME
     CHECK --> WORLD --> GAME
     CHECK --> STORE
     HOOK -- 换日与存档 --> DAY --> STORE
@@ -45,7 +46,7 @@ flowchart TD
     CHECK -- 人物回复与结果提示 --> UI
 ```
 
-人物回复与 GM 审核是两种职责，但使用同一份当前接口配置；GM 仅在符合触发条件时串行调用。模型只输出候选回复和提案，不能直接调用原版函数或任意改写字段。实际改变由运行时核对当前人物、交易现场、执行器白名单和快照时效后完成。请求失败或人物身份冲突会转入本地回复；过期回合的文字可以显示，但其副作用会被移除。
+人物回复与 GM 审核是两种职责，但使用同一份当前接口配置；GM 仅在符合触发条件时串行调用。模型只输出候选回复和提案，不能直接调用原版函数或任意改写字段。实际改变由运行时核对当前人物、交易现场、执行器白名单和快照时效后完成。所有已接通的交易、交换、补款、找货、回访、第三方联系和 GM 数值修正，都会先经过统一提交闸门，再调用原版适配器或数值执行器；执行前写入账本，执行后用原版结果闭合回执。请求失败或人物身份冲突会转入本地回复；过期回合的文字可以显示，但其副作用会被移除。
 
 主要实现位置：
 
@@ -55,5 +56,7 @@ flowchart TD
 - `src/Runtime/WorldRuntime.cs`、`src/Model/OpenAiCompatibleProvider.cs`：人物回复、条件 GM 复核与回合协调。
 - `src/GM/GmInterfaceCatalog.cs`、`src/GM/GmModificationEngine.cs`、`src/Runtime/Native*Adapter.cs`：可执行接口目录、受限修改与原版适配器。
 - `src/Orchestration/EchoWeaveRuntime.cs`、`src/Orchestration/IntentLedger.cs`、`src/Storage/JsonFileStore.cs`：去重、状态恢复和持久化。旧类名保留用于存档兼容，对外统一称 GM 系统。
+
+能力状态的含义：`implemented` 表示已经有实际适配器或数值执行器，并且会经过提交闸门；`catalog_only` 只允许被知识目录检索，不能执行；`readable`/`discovered` 只代表已发现或可读取，不能作为 GM 写入路径。警报器、偷窃和保险相关字段目前仍属于后两类。
 
 桌面分享包只包含 `AIWorldPawnshop.dll` 与使用说明，不包含本开发架构文档。
