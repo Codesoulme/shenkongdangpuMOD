@@ -42,4 +42,10 @@ if ($modVersion -ne $assemblyVersion) {
     throw "ModVersion $modVersion 与构建 DLL 版本 $assemblyVersion 不一致。"
 }
 
+$capabilities = @($manifest.ModManifest.Capabilities.Capability) |
+    ForEach-Object { [string]$_ }
+if ("System.Runtime.CompilerServices.Unsafe.dll" -in $actual -and "native" -notin $capabilities) {
+    throw "System.Runtime.CompilerServices.Unsafe.dll 需要在清单中声明 native 权限。"
+}
+
 Write-Host "发布清单校验通过：$modVersion / 游戏 $GameVersion / $($actual.Count) 个 DLL"
