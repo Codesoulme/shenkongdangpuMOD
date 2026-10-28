@@ -148,7 +148,7 @@ public sealed class OpenAiCompatibleProvider : IModelProvider
                     protocol,
                     gmRequest,
                     cancellationToken,
-                    GmSystemPrompt + ThirdPartyTaskRules,
+                    GmSystemPrompt + ThirdPartyTaskRules + BarterCashDirectionRules,
                     maxOutputTokens: Math.Min(_profile.MaxOutputTokens, 280))
                 .ConfigureAwait(false);
             if (attempt.Response is not null)
@@ -435,7 +435,8 @@ public sealed class OpenAiCompatibleProvider : IModelProvider
         if (scoped)
         {
             var text = request.PlayerText;
-            var includeTrade = ContainsAny(text,
+            var includeBarter = ConversationActionResolver.IsBarterDiscussion(request);
+            var includeTrade = includeBarter || ContainsAny(text,
                 "价格", "价钱", "多少钱", "便宜", "贵", "折", "优惠", "加价", "报价",
                 "批发", "批发价", "wholesale", "信用点", "预算", "补付", "付款", "支付", "给我", "买", "卖", "交易",
                 "交换", "换", "物品", "东西", "货", "随身", "price", "discount", "trade",
@@ -451,9 +452,6 @@ public sealed class OpenAiCompatibleProvider : IModelProvider
                 "保险", "新闻", "供应", "供给", "需求", "市场", "缺货", "涨价", "降价",
                 "事件", "治安", "物价", "安全", "保护", "环境", "情况", "生意", "客流",
                 "库存", "长期", "永久", "附近", "店门", "城市", "街区");
-            var includeBarter = ContainsAny(text,
-                "交换", "换", "以物易物", "拿这个换", "用这个换", "barter", "swap", "exchange");
-
             return JsonConvert.SerializeObject(new
             {
                 conversation_id = request.ConversationId,
@@ -694,7 +692,8 @@ public sealed class OpenAiCompatibleProvider : IModelProvider
 
     private static bool RequiresDetailedInstructions(ConversationRequest request)
     {
-        if (request.GameContext.ThirdPartyTasks.Count > 0)
+        if (request.GameContext.ThirdPartyTasks.Count > 0 ||
+            ConversationActionResolver.IsBarterDiscussion(request))
             return true;
 
         var text = request.PlayerText;
@@ -750,8 +749,7 @@ public sealed class OpenAiCompatibleProvider : IModelProvider
                 "other items", "carrying"))
             builder.Append(CarriedInventoryInstructionBlock);
 
-        if (ContainsAny(text,
-                "交换", "换", "以物换物", "barter", "swap", "exchange"))
+        if (ConversationActionResolver.IsBarterDiscussion(request))
             builder.Append(BarterInstructionBlock);
 
         if (ContainsAny(text,
@@ -1421,7 +1419,7 @@ public sealed class OpenAiCompatibleProvider : IModelProvider
     private const string CarriedInventoryInstructionBlock = @"随身物品规则：玩家要求查看顾客本次携带的其他货物时才使用 carried_inventory_proposal；只有人物同意且 client_carried_items 中确有 owner=client 的物品时 accepted=true。item_runtime_key、item_key、item_name 只能从该列表中选择；没有真实物品时必须拒绝，不能说有一件并承诺拿出来。列表有多件且玩家没有指定时，不要擅自挑选，应先追问。
 ";
 
-    private const string BarterInstructionBlock = @"混合交换规则：明确以物换物才返回 barter_proposal。client_item_runtime_key 必须来自 owner=client；required_player_item_runtime_key 或 runtime_keys 必须来自 owner=player，并优先用运行时编号唯一定位。不得用顾客物品充当玩家物品，不得虚构。必须读取 trade.client_carried_items 和 trade.player_offered_items 中的 base_value、current_value、negotiated_value、quantity，比较顾客给出的一侧（包括补付款）与玩家给出的一侧。value_assessment.decision 只能为 accept、reject、adjust 或 unknown，并填写简短理由；价值缺失、归属不明或明显失衡时不得 accepted=true，应拒绝或要求调整。模型填写的金额只是判断依据，Mod 会在成交前再次用原版数据校验。若同一提议还包含补付，另按补付规则返回 wallet_transfer，两个提案都只描述约定条件，等待原版确认后一起结算。
+    private const string BarterInstructionBlock = @"混合交换规则：明确以物换物才返回 barter_proposal。client_item_runtime_key 必须来自 owner=client；required_player_item_runtime_key 或 runtime_keys 必须来自 owner=player，并优先用运行时编号唯一定位。不得用顾客物品充当玩家物品，不得虚构。必须读取 trade.client_carried_items 和 trade.player_offered_items 中的 base_value、current_value、negotiated_value、quantity，比较顾客给出的一侧（包括补付款）与玩家给出的一侧。按双方当前报价算，玩家物品更贵时名义差价应由顾客补玩家，顾客物品更贵时才轮到玩家补。人物可以因为不需要某物、风险或稀缺性拒绝按名义差价交换，但必须把这种主观条件说清楚，不能把算术方向说反。玩家向顾客另付信用点目前不能随交换一起结算；若谈到这种条件，不能 accepted=true，也不能假装已经付过。value_assessment.decision 只能为 accept、reject、adjust 或 unknown，并填写简短理由；价值缺失、归属不明或明显失衡时不得 accepted=true，应拒绝或要求调整。模型填写的金额只是判断依据，Mod 会在成交前再次用原版数据校验。若同一提议还包含顾客补付玩家，另按补付规则返回 wallet_transfer，两个提案都只描述约定条件，等待原版确认后一起结算。
 ";
 
     private const string WalletInstructionBlock = @"补付规则：wallet_transfer 只用于人物明确承诺从当前顾客 client_budget 另付给玩家的整数金额；npc_reply 明确答应后 accepted 才能为 true，source 固定为 client_budget。普通价格、找零、玩家付款不能误报成补付。
@@ -1439,6 +1437,8 @@ public sealed class OpenAiCompatibleProvider : IModelProvider
     private const string SparseOutputInstructionBlock = @"只返回 JSON，不要 Markdown。始终返回 npc_reply；可按需返回 conversation_mode、topic、task_relevance、mood、signals、memory_candidates、gm_review。只有本轮确实出现对应意图时才返回 trade_proposal、wallet_transfer、procurement_proposal、return_visit_proposal、carried_inventory_proposal、barter_proposal、third_party_task；未发生的行为字段必须省略，解析器会补默认值。barter_proposal 出现时必须带 value_assessment；没有可靠价值依据时 decision=unknown 且 accepted=false。只有人物明确答应造成对话之外的持续状态变化、且没有标准行为提案承载时 gm_review=true；询问或拒绝时省略。signals 值为 -2 到 2；memory_candidates 只记录玩家值得长期记住的明确行为，默认仅当前人物知道；只有明确要向整个阵营公开时才填 scope=faction，并提供本轮对话原文 evidence；world_modifications 省略。";
 
     private const string ThirdPartyTaskRules = "third_party_task 只用于玩家明确请当前人物联系另一个已知人物，且人物在 npc_reply 中明确答应；目标人物必须来自 known_characters、原版上下文或 GM 可见的人物目录，不得创造身份。提案必须使用目录中的稳定 key 和原显示名；无法唯一对应时自然拒绝或追问，accepted=false。third_party_tasks 中状态为 arrived 且当前人物就是目标时，人物可以独立选择 decision=accept 或 reject；传话人此前答应不等于目标同意。";
+
+    private const string BarterCashDirectionRules = "交换差价复核：玩家物品报价高于顾客物品时，按报价方向应由顾客补玩家；顾客不想要玩家物品可以拒绝或提出有明确理由的主观条件，但不得把价差方向算反。wallet_transfer 只表示顾客预算付给玩家，不能代表玩家付款。人物候选要求玩家补顾客信用点时，barter_proposal.accepted 必须为 false；人物承诺顾客补款但没有同金额、同方向的 wallet_transfer 时也不能接受。";
 
     private sealed class RequestAttempt
     {

@@ -290,6 +290,49 @@ internal static class PlayerStoreAcceptBarterPatch
     }
 }
 
+// The native barter panel lists every unowned counter item. Restrict that
+// visual list to the exact customer item only while a Mod offer is rendered.
+[HarmonyPatch(typeof(NegociationUIManager), "BuildBarter")]
+internal static class NegotiationBuildBarterUiScopePatch
+{
+    [ThreadStatic] private static int _depth;
+
+    internal static bool IsActive => _depth > 0;
+
+    private static void Prefix(StoreClient __0, out bool __state)
+    {
+        __state = NativeBarterAdapter.IsActiveUiOffer(__0);
+        if (__state)
+            _depth++;
+    }
+
+    private static void Postfix(ref bool __state) => Exit(ref __state);
+
+    private static Exception? Finalizer(Exception? __exception, ref bool __state)
+    {
+        Exit(ref __state);
+        return __exception;
+    }
+
+    private static void Exit(ref bool entered)
+    {
+        if (!entered)
+            return;
+        _depth--;
+        entered = false;
+    }
+}
+
+[HarmonyPatch(typeof(EmporiumEntry), nameof(EmporiumEntry.GetAllNonOwnedItem))]
+internal static class EmporiumEntryBarterDisplayItemsPatch
+{
+    private static void Postfix(ref List<GameItem> __result)
+    {
+        if (NegotiationBuildBarterUiScopePatch.IsActive && __result is not null)
+            __result = NativeBarterAdapter.FilterDisplayedClientItems(__result);
+    }
+}
+
 [HarmonyPatch(typeof(BarterOffer), nameof(BarterOffer.OnBarterAccepted))]
 internal static class BarterOfferOnBarterAcceptedPatch
 {

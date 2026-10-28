@@ -23,6 +23,23 @@ internal static class NativeBarterAdapter
 
     internal static bool HasActiveExecution => _execution is not null;
 
+    internal static bool IsActiveUiOffer(StoreClient? client)
+    {
+        var execution = _execution;
+        var offer = client?.barterOffer;
+        return execution is { Failed: false } && offer is not null &&
+               FirstNotBlank(client?.identifier, client?.displayName)
+                   .Equals(execution.ClientKey, StringComparison.OrdinalIgnoreCase) &&
+               IsMatchingNativeOffer(offer, execution);
+    }
+
+    internal static List<GameItem> FilterDisplayedClientItems(List<GameItem> items)
+    {
+        var targetKey = _execution?.ClientItemRuntimeKey ?? 0;
+        var target = items.FirstOrDefault(item => SafeRuntimeKey(item) == targetKey);
+        return target is null ? new List<GameItem>() : new List<GameItem> { target };
+    }
+
     /// <summary>
     /// The native condition language has no runtime-key field.  These are the
     /// only existing discriminators that can be put into a native condition

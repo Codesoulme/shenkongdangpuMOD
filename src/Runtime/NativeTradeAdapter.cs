@@ -39,6 +39,12 @@ internal static class NativeTradeAdapter
         if (!request.Scene.Equals("store", StringComparison.OrdinalIgnoreCase))
             return Result(false, false, response.TradeProposal, "电话交谈不能修改店内交易");
 
+        if (response.BarterProposal.Explicit ||
+            (ConversationActionResolver.IsBarterDiscussion(request) &&
+             !ContainsAny(request.PlayerText,
+                 "打折", "优惠", "降价", "涨价", "加价", "提价", "砍价")))
+            return Result(false, false, response.TradeProposal, "交换差价讨论不属于单品议价");
+
         try
         {
             var playerStore = PlayerStore.Instance;
@@ -651,6 +657,9 @@ internal static class NativeTradeAdapter
         return $"{match.Groups["count"].Value}{match.Groups["unit"].Value}" +
                match.Groups["name"].Value.Trim();
     }
+
+    private static bool ContainsAny(string value, params string[] terms) =>
+        terms.Any(term => value.Contains(term, StringComparison.OrdinalIgnoreCase));
 
     private static string BuildClarificationQuestion() =>
         "这项价格约定只算现在柜台上的商品，还是后面新加的也算？";

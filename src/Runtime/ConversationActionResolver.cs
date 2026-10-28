@@ -6,6 +6,17 @@ internal static class ConversationActionResolver
 {
     internal static string NaturalBarterFailureReply => "抱歉，这次交换我没法确认，还是算了。";
 
+    internal static bool IsBarterDiscussion(ConversationRequest request)
+    {
+        var text = request.PlayerText ?? string.Empty;
+        if (ContainsAny(text, "交换", "换", "以物易物", "barter", "swap", "exchange"))
+            return true;
+        if (!ContainsAny(text, "差价", "差额", "补", "贵", "值", "价", "信用点", "成交", "接受"))
+            return false;
+        return request.RecentHistory.TakeLast(8).Any(line =>
+            ContainsAny(line, "交换", "换", "以物易物", "barter", "swap", "exchange"));
+    }
+
     public static void Normalize(ConversationRequest request, ConversationResponse response)
     {
         if (IsRefusalReply(response.NpcReply))
@@ -333,6 +344,33 @@ internal static class ConversationActionResolver
         if (!proposal.Explicit || !proposal.Accepted)
             return;
 
+        var playerOfferedCash = PlayerOffersBarterCash(request.PlayerText);
+        var reply = response.NpcReply ?? string.Empty;
+        var playerCashWaived = ContainsAny(reply,
+            "不用你补", "你不用补", "不需要你补", "不要你补", "你不必补", "不收你补", "别补", "不用你付");
+        var customerPromisedCash = ContainsAny(reply,
+            "我补给你", "我给你补", "我付给你", "我再补", "我补", "我给你") &&
+            ContainsAny(reply, "信用点", "差价", "差额", "补款");
+        var customerCashReserved = response.WalletTransfer.Explicit &&
+                                   response.WalletTransfer.Accepted &&
+                                   response.WalletTransfer.Amount > 0;
+        var customerDemandsPlayerCash = ContainsAny(reply,
+            "你补", "你得补", "你来补", "由你补", "你付", "你给我补", "你再给我",
+            "你还要补", "你还得补", "让你补", "需要你补", "你需要补", "你来出") &&
+            ContainsAny(reply, "信用点", "差价", "差额", "补款") &&
+            !playerCashWaived;
+        if ((playerOfferedCash && !playerCashWaived) || customerDemandsPlayerCash ||
+            (customerPromisedCash && !customerCashReserved))
+        {
+            proposal.Accepted = false;
+            proposal.Reason = "交换中约定的现金方向或金额没有可执行的结算条件";
+            response.WalletTransfer = new WalletTransferProposal();
+            response.NpcReply = "这笔交换的补款条件还没谈妥，先别结算。我们再换个条件谈。";
+            return;
+        }
+        if (playerOfferedCash && playerCashWaived && !customerPromisedCash)
+            response.WalletTransfer = new WalletTransferProposal();
+
         var check = BarterValuePolicy.Evaluate(request, response);
         if (!check.Allowed)
         {
@@ -350,12 +388,26 @@ internal static class ConversationActionResolver
             proposal.ValueAssessment.Reason = check.Message;
     }
 
+    private static bool PlayerOffersBarterCash(string? playerText)
+    {
+        var text = playerText ?? string.Empty;
+        if (!ContainsAny(text, "信用点", "差价", "差额", "补款") &&
+            !text.Any(char.IsDigit))
+            return false;
+        if (ContainsAny(text, "我不补", "不该我补", "不要我补", "不需要我补",
+                "为什么我补", "为什么要我补", "凭什么我补", "要我补？", "要我补?",
+                "我不付", "我不给你", "给我补", "你给我补", "顾客补", "客人补"))
+            return false;
+        return ContainsAny(text, "我补", "我来补", "由我补", "我付", "我给你",
+            "我再给你", "我出差价", "我倒贴");
+    }
+
     private static void NormalizeWholesaleReply(
         ConversationRequest request,
         ConversationResponse response)
     {
         var trade = request.GameContext.Trade;
-        if (!trade.IsOfferWholesale ||
+        if (response.BarterProposal.Explicit || !trade.IsOfferWholesale ||
             string.IsNullOrWhiteSpace(response.NpcReply))
             return;
 
