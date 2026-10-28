@@ -6,6 +6,7 @@ param(
 $ErrorActionPreference = "Stop"
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $buildDir = Join-Path $projectRoot "bin\$Configuration\netstandard2.1"
+& (Join-Path $PSScriptRoot "validate-release.ps1") -BuildDir $buildDir
 $required = @("FreeChatBargainBarter.dll", "System.Text.Json.dll")
 foreach ($name in $required) {
     if (-not (Test-Path -LiteralPath (Join-Path $buildDir $name))) {

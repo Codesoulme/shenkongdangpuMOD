@@ -1,6 +1,6 @@
 # 《自由聊天&议价&交换》Mod
 
-目标版本：Probably Stolen 正式版（AppID 4348910，ModLoader 100-Rev1）
+目标版本：Probably Stolen 正式版 0.46D（AppID 4348910，ModLoader 100-Rev1）
 
 v2 架构设计：GM 系统（旧版设计文档仍保留历史名称）
 

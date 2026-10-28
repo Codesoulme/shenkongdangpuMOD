@@ -1,8 +1,8 @@
 《自由聊天&议价&交换》Mod - 功能清单与配置说明
 =================================
 
-版本：0.4.0
-适配游戏：Probably Stolen 正式版（AppID 4348910，ModLoader 100-Rev1）
+版本：0.4.1
+适配游戏：Probably Stolen 正式版 0.46D（AppID 4348910，ModLoader 100-Rev1）
 发布日期：2026-10-29
 
 
@@ -193,7 +193,7 @@ C:\Users\<用户名>\AppData\LocalLow\Questing Goose Studio\Probably Stolen\AIWo
 七、当前限制
 ------------
 
-- 本版本按 Probably Stolen 正式版 ModLoader 100-Rev1 适配；其他版本可能因原版字段变化而失效。
+- 本版本按 Probably Stolen 正式版 0.46D 适配；其他版本可能因原版字段变化而失效。
 - 原版来客队列、报纸排版、复杂多物品交换等仍可能存在实机边界情况。
 - 目前世界变化集中在价格、需求、供给及其已接通的间接效果，不能任意修改剧情变量或未知机制。
 - 回复速度主要受所填服务、网络状况、排队时间和模型速度影响。

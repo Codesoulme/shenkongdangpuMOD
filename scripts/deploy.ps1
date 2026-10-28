@@ -15,6 +15,8 @@ if (-not (Test-Path $dll)) {
     throw "找不到构建产物：$dll"
 }
 
+& (Join-Path $PSScriptRoot "validate-release.ps1") -BuildDir $buildDir
+
 New-Item -ItemType Directory -Force -Path $modsDir, $dataDir, (Join-Path $dataDir "Logs") | Out-Null
 Get-ChildItem -LiteralPath $buildDir -Filter "*.dll" -File |
     Copy-Item -Destination $modsDir -Force
