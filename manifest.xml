@@ -3,27 +3,18 @@
   <ID>FreeChatBargainBarter</ID>
   <Name>自由聊天&amp;议价&amp;交换</Name>
   <Author>一万万</Author>
-  <ModVersion>0.4.2</ModVersion>
+  <ModVersion>0.4.3</ModVersion>
   <Description>让店内顾客和电话联系人支持自由聊天，并把经过验证的议价、物品交换、补付和回访约定接入正式版原版流程。</Description>
   <GameVersions>
     <Version>0.46D</Version>
   </GameVersions>
   <Assemblies>
-    <Assembly>System.Runtime.CompilerServices.Unsafe.dll</Assembly>
-    <Assembly>System.Buffers.dll</Assembly>
-    <Assembly>System.Numerics.Vectors.dll</Assembly>
-    <Assembly>System.Memory.dll</Assembly>
-    <Assembly>System.Threading.Tasks.Extensions.dll</Assembly>
-    <Assembly>Microsoft.Bcl.AsyncInterfaces.dll</Assembly>
-    <Assembly>System.Text.Encodings.Web.dll</Assembly>
-    <Assembly>System.Text.Json.dll</Assembly>
     <Assembly>FreeChatBargainBarter.dll</Assembly>
   </Assemblies>
   <Capabilities>
     <Capability>files</Capability>
     <Capability>network</Capability>
     <Capability>dynamic-code</Capability>
-    <Capability>native</Capability>
     <Capability>reflection-external</Capability>
   </Capabilities>
 </ModManifest>

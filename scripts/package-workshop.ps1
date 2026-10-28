@@ -7,7 +7,7 @@ $ErrorActionPreference = "Stop"
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $buildDir = Join-Path $projectRoot "bin\$Configuration\netstandard2.1"
 & (Join-Path $PSScriptRoot "validate-release.ps1") -BuildDir $buildDir
-$required = @("FreeChatBargainBarter.dll", "System.Text.Json.dll")
+$required = @("FreeChatBargainBarter.dll")
 foreach ($name in $required) {
     if (-not (Test-Path -LiteralPath (Join-Path $buildDir $name))) {
         throw "缺少构建产物：$name。请先构建 Release 版本。"
@@ -16,6 +16,18 @@ foreach ($name in $required) {
 
 New-Item -ItemType Directory -Path $OutputDir -Force | Out-Null
 $outputPath = (Resolve-Path -LiteralPath $OutputDir).Path
+$obsolete = @(
+    "Microsoft.Bcl.AsyncInterfaces.dll", "System.Buffers.dll", "System.Memory.dll",
+    "System.Numerics.Vectors.dll", "System.Runtime.CompilerServices.Unsafe.dll",
+    "System.Text.Encodings.Web.dll", "System.Text.Json.dll",
+    "System.Threading.Tasks.Extensions.dll"
+)
+foreach ($name in $obsolete) {
+    $oldPath = Join-Path $outputPath $name
+    if (Test-Path -LiteralPath $oldPath) {
+        Remove-Item -LiteralPath $oldPath -Force
+    }
+}
 $assemblies = Get-ChildItem -LiteralPath $buildDir -Filter "*.dll" -File
 $expected = @($assemblies.Name) + @("manifest.xml", "preview.png")
 $unexpected = Get-ChildItem -LiteralPath $outputPath -File |

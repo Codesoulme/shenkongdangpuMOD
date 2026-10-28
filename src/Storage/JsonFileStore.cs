@@ -1,5 +1,5 @@
-using System.Text.Json;
-using System.Text.Json.Serialization;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Converters;
 using MelonLoader;
 using AIWorldPawnshop.Models;
 
@@ -9,11 +9,10 @@ public sealed class JsonFileStore
 {
     private readonly string _root;
     private readonly HashSet<string> _recoveredPaths = new(StringComparer.OrdinalIgnoreCase);
-    private readonly JsonSerializerOptions _options = new()
+    private readonly JsonSerializerSettings _options = new()
     {
-        WriteIndented = true,
-        PropertyNameCaseInsensitive = true,
-        Converters = { new JsonStringEnumConverter() }
+        Formatting = Formatting.Indented,
+        Converters = { new StringEnumConverter() }
     };
 
     public JsonFileStore(string root)
@@ -211,7 +210,7 @@ public sealed class JsonFileStore
     {
         try
         {
-            return JsonSerializer.Deserialize<T>(File.ReadAllText(path), _options);
+            return JsonConvert.DeserializeObject<T>(File.ReadAllText(path), _options);
         }
         catch (Exception ex)
         {
@@ -222,7 +221,7 @@ public sealed class JsonFileStore
                 return default;
             try
             {
-                var recovered = JsonSerializer.Deserialize<T>(File.ReadAllText(backup), _options);
+                var recovered = JsonConvert.DeserializeObject<T>(File.ReadAllText(backup), _options);
                 if (recovered is not null)
                 {
                     _recoveredPaths.Add(path);
@@ -243,7 +242,7 @@ public sealed class JsonFileStore
         var temp = path + ".tmp";
         try
         {
-            File.WriteAllText(temp, JsonSerializer.Serialize(value, _options));
+            File.WriteAllText(temp, JsonConvert.SerializeObject(value, _options));
             if (File.Exists(path) && !_recoveredPaths.Contains(path))
                 File.Copy(path, path + ".bak", true);
             RuntimeCompat.MoveReplace(temp, path);

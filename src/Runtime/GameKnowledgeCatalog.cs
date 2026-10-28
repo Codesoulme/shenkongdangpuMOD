@@ -1,5 +1,5 @@
 using System.Security.Cryptography;
-using System.Text.Json;
+using Newtonsoft.Json;
 using AIWorldPawnshop.Models;
 using MelonLoader;
 
@@ -319,7 +319,7 @@ public sealed class GameKnowledgeCatalog
         var temporary = _path + ".tmp";
         try
         {
-            File.WriteAllText(temporary, JsonSerializer.Serialize(_snapshot));
+            File.WriteAllText(temporary, JsonConvert.SerializeObject(_snapshot));
             RuntimeCompat.MoveReplace(temporary, _path);
             _dirty = false;
         }
@@ -339,7 +339,7 @@ public sealed class GameKnowledgeCatalog
         {
             if (File.Exists(path))
             {
-                var snapshot = JsonSerializer.Deserialize<GameKnowledgeSnapshot>(File.ReadAllText(path)) ?? new();
+                var snapshot = JsonConvert.DeserializeObject<GameKnowledgeSnapshot>(File.ReadAllText(path)) ?? new();
                 snapshot.Files ??= new();
                 snapshot.Items ??= new();
                 snapshot.People ??= new();

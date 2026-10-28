@@ -94,6 +94,7 @@ GM 系统数据位于同一扩展目录（旧文件名继续兼容）：
 
 ```powershell
 dotnet run --project .\tools\EchoWeaveSmoke\EchoWeaveSmoke.csproj
+dotnet run --project .\tools\JsonCompatibilityHarness\JsonCompatibilityHarness.csproj -c Release
 dotnet run --project .\tools\FormalPatchHarness\FormalPatchHarness.csproj -c Release -- .\bin\Release\netstandard2.1\FreeChatBargainBarter.dll "E:\SteamLibrary\steamapps\common\Probably Stolen"
 ```
 
@@ -103,7 +104,7 @@ dotnet run --project .\tools\FormalPatchHarness\FormalPatchHarness.csproj -c Rel
 .\scripts\deploy.ps1
 ```
 
-部署脚本复制清单、Mod DLL 及其依赖、头图和默认配置，不修改原版程序集。配置和本地内容会复制到
+部署脚本复制清单、Mod DLL、头图和默认配置，不修改原版程序集。配置和本地内容会复制到
 Unity 的 `Application.persistentDataPath` 对应目录。
 
 工坊发布目录由 `.\scripts\package-workshop.ps1` 生成到桌面；该目录是上传源文件，订阅用户无需手动复制。

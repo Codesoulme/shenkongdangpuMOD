@@ -1,4 +1,5 @@
-using System.Text.Json.Serialization;
+using JsonPropertyName = Newtonsoft.Json.JsonPropertyAttribute;
+using JsonIgnore = Newtonsoft.Json.JsonIgnoreAttribute;
 
 namespace AIWorldPawnshop.Models;
 

@@ -18,6 +18,18 @@ if (-not (Test-Path $dll)) {
 & (Join-Path $PSScriptRoot "validate-release.ps1") -BuildDir $buildDir
 
 New-Item -ItemType Directory -Force -Path $modsDir, $dataDir, (Join-Path $dataDir "Logs") | Out-Null
+$obsolete = @(
+    "Microsoft.Bcl.AsyncInterfaces.dll", "System.Buffers.dll", "System.Memory.dll",
+    "System.Numerics.Vectors.dll", "System.Runtime.CompilerServices.Unsafe.dll",
+    "System.Text.Encodings.Web.dll", "System.Text.Json.dll",
+    "System.Threading.Tasks.Extensions.dll"
+)
+foreach ($name in $obsolete) {
+    $oldPath = Join-Path $modsDir $name
+    if (Test-Path -LiteralPath $oldPath) {
+        Remove-Item -LiteralPath $oldPath -Force
+    }
+}
 Get-ChildItem -LiteralPath $buildDir -Filter "*.dll" -File |
     Copy-Item -Destination $modsDir -Force
 Copy-Item -LiteralPath (Join-Path $projectRoot "manifest.xml") -Destination (Join-Path $modsDir "manifest.xml") -Force

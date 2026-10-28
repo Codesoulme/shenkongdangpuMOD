@@ -1,7 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
-using System.Text.Json;
-using System.Text.Json.Serialization;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Converters;
 using AIWorldPawnshop.Capabilities;
 using AIWorldPawnshop.Models;
 using AIWorldPawnshop.Models.EchoWeave;
@@ -361,7 +361,7 @@ public sealed class EchoWeaveRuntime
         {
             if (!File.Exists(_snapshotPath))
                 return null;
-            return JsonSerializer.Deserialize<EchoWeaveSnapshot>(
+            return JsonConvert.DeserializeObject<EchoWeaveSnapshot>(
                 File.ReadAllText(_snapshotPath), JsonOptions());
         }
         catch
@@ -384,7 +384,7 @@ public sealed class EchoWeaveRuntime
         var temp = _snapshotPath + ".tmp";
         try
         {
-            File.WriteAllText(temp, JsonSerializer.Serialize(snapshot, JsonOptions()), Encoding.UTF8);
+            File.WriteAllText(temp, JsonConvert.SerializeObject(snapshot, JsonOptions()), Encoding.UTF8);
             if (File.Exists(_snapshotPath))
                 File.Copy(_snapshotPath, _snapshotPath + ".bak", true);
             RuntimeCompat.MoveReplace(temp, _snapshotPath);
@@ -403,11 +403,10 @@ public sealed class EchoWeaveRuntime
         }
     }
 
-    internal static JsonSerializerOptions JsonOptions(bool writeIndented = true) => new()
+    internal static JsonSerializerSettings JsonOptions(bool writeIndented = true) => new()
     {
-        WriteIndented = writeIndented,
-        PropertyNameCaseInsensitive = true,
-        Converters = { new JsonStringEnumConverter() }
+        Formatting = writeIndented ? Formatting.Indented : Formatting.None,
+        Converters = { new StringEnumConverter() }
     };
 
     private static string FirstNotBlank(params string?[] values) =>

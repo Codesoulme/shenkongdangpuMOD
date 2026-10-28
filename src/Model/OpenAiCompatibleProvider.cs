@@ -1,8 +1,8 @@
 using System.Diagnostics;
 using System.Net.Http.Headers;
 using System.Text;
-using System.Text.Json;
-using System.Text.Json.Serialization;
+using AIWorldPawnshop.JsonCompat;
+using Newtonsoft.Json;
 using AIWorldPawnshop.Models;
 using AIWorldPawnshop.Runtime;
 
@@ -13,9 +13,9 @@ public sealed class OpenAiCompatibleProvider : IModelProvider
     private const string AutoProtocol = "auto";
     private const string ChatCompletionsProtocol = "chat_completions";
     private const string ResponsesProtocol = "responses";
-    private static readonly JsonSerializerOptions OmitNullJsonOptions = new()
+    private static readonly JsonSerializerSettings OmitNullJsonOptions = new()
     {
-        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+        NullValueHandling = NullValueHandling.Ignore
     };
 
     private readonly HttpClient _httpClient;
@@ -428,7 +428,7 @@ public sealed class OpenAiCompatibleProvider : IModelProvider
         bool scoped)
     {
         if (!compact && !scoped)
-            return JsonSerializer.Serialize(request);
+            return JsonConvert.SerializeObject(request);
 
         var context = request.GameContext;
         var trade = context.Trade;
@@ -454,7 +454,7 @@ public sealed class OpenAiCompatibleProvider : IModelProvider
             var includeBarter = ContainsAny(text,
                 "交换", "换", "以物易物", "拿这个换", "用这个换", "barter", "swap", "exchange");
 
-            return JsonSerializer.Serialize(new
+            return JsonConvert.SerializeObject(new
             {
                 conversation_id = request.ConversationId,
                 turn_id = request.TurnId,
@@ -488,7 +488,7 @@ public sealed class OpenAiCompatibleProvider : IModelProvider
             }, OmitNullJsonOptions);
         }
 
-        return JsonSerializer.Serialize(new
+        return JsonConvert.SerializeObject(new
         {
             conversation_id = request.ConversationId,
             turn_id = request.TurnId,
@@ -623,7 +623,7 @@ public sealed class OpenAiCompatibleProvider : IModelProvider
         message.Headers.Accept.Add(
             new MediaTypeWithQualityHeaderValue("application/json"));
         message.Content = new StringContent(
-            JsonSerializer.Serialize(body),
+            JsonConvert.SerializeObject(body),
             Encoding.UTF8,
             "application/json");
         return message;

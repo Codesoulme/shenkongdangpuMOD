@@ -3,7 +3,9 @@ using AIWorldPawnshop.Model;
 using AIWorldPawnshop.Models;
 using AIWorldPawnshop.Runtime;
 using MelonLoader;
+using TMPro;
 using UnityEngine;
+using UnityEngine.UI;
 
 namespace AIWorldPawnshop.UI;
 
@@ -94,15 +96,17 @@ public sealed class ModelSettingsUiController
             .SetCloseOnEscape()
             .SetDraggable(true);
 
-        builder.BeginColumn(8f);
+        builder.BeginColumn(10f);
         builder.AddLabel("模型接口设置", "title");
         builder.AddLabel(BuildProfileSummary(profile), "profile_summary");
+        builder.BeginRow(10f);
         builder.AddButton("上一个接口", new Action(() => SwitchProfile(runtime, -1)), "previous");
         builder.AddButton("下一个接口", new Action(() => SwitchProfile(runtime, 1)), "next");
         builder.AddButton("复制为新接口", new Action(() => DuplicateProfile(runtime)), "duplicate");
         builder.AddButton("删除当前接口", new Action(() => DeleteProfile(runtime)), "delete");
+        builder.End();
 
-        builder.BeginScroll(420f);
+        builder.BeginScrollFlexible(150f);
         builder.AddLabel("接口名称", "name_label");
         builder.AddInput("例如：本地模型 / 云端模型", profile.Name,
             new Action<string>(value => profile.Name = value), "name");
@@ -132,10 +136,12 @@ public sealed class ModelSettingsUiController
 
         builder.AddButton(BuildNetworkButtonText(profile), new Action(() => ToggleNetwork()), NetworkButtonId);
         builder.AddLabel(_status, StatusId);
+        builder.BeginRow(10f);
         builder.AddButton("检测连接", new Action(() => StartConnectionTest(runtime)), "test");
         builder.AddButton("保存并使用", new Action(() => SaveAndApply(runtime)), "save");
         builder.AddButton("恢复当前接口默认值", new Action(() => ResetProfile(runtime)), "reset");
         builder.AddButton("关闭", new Action(Close), "close");
+        builder.End();
         builder.AddLabel(
             "保存后立即使用当前接口。接口不可用时会自动回到本地预置回复。",
             "hint");
@@ -152,6 +158,7 @@ public sealed class ModelSettingsUiController
             "api_key_env",
             "timeout",
             "max_tokens");
+        SizeControls();
     }
 
     private void SwitchProfile(WorldRuntime runtime, int direction)
@@ -321,9 +328,73 @@ public sealed class ModelSettingsUiController
 
     private void SetStatus(string status)
     {
-        _status = status;
+        _status = status.Length > 180 ? status[..177] + "..." : status;
         if (_window is not null && _window.IsAlive)
-            _window.Get(StatusId)?.SetText(status);
+        {
+            _window.Get(StatusId)?.SetText(_status);
+            SizeStatus();
+        }
+    }
+
+    private void SizeControls()
+    {
+        SetControlHeight("title", 38f);
+        SetControlHeight("profile_summary", 34f);
+        foreach (var id in new[] { "previous", "next", "duplicate", "delete", "test", "save", "reset", "close", NetworkButtonId })
+            SetControlHeight(id, 48f, button: true);
+
+        foreach (var id in new[] { "name_label", "base_url_label", "model_label", "api_key_label", "api_key_env_label", "timeout_label", "max_tokens_label" })
+            SetControlHeight(id, 30f);
+        foreach (var id in new[] { "name", "base_url", "model", "api_key", "api_key_env", "timeout", "max_tokens" })
+            SetControlHeight(id, 42f);
+        SetControlHeight(ProtocolButtonId, 48f, button: true);
+        SetControlHeight("protocol_hint", 52f);
+        SetControlHeight("hint", 44f);
+        SizeStatus();
+    }
+
+    private void SizeStatus()
+    {
+        var text = _window?.Get(StatusId)?.text;
+        var width = Math.Max(280f, (_window?.Rect.rect.width ?? 780f) - 70f);
+        var height = text is null
+            ? 34f
+            : Mathf.Clamp(text.GetPreferredValues(_status, width, 0f).y + 12f, 34f, 100f);
+        SetControlHeight(StatusId, height);
+    }
+
+    private void SetControlHeight(string id, float height, bool button = false)
+    {
+        var element = _window?.Get(id);
+        var rect = element?.Rect;
+        if (rect is null)
+            return;
+
+        var layout = rect.GetComponent<LayoutElement>() ?? rect.gameObject.AddComponent<LayoutElement>();
+        layout.minHeight = height;
+        layout.preferredHeight = height;
+        if (button)
+        {
+            layout.flexibleWidth = 1f;
+            if (element?.text is not null)
+            {
+                element.text.enableAutoSizing = true;
+                element.text.fontSizeMin = 14f;
+                element.text.fontSizeMax = 19f;
+                element.text.enableWordWrapping = false;
+                element.text.overflowMode = TextOverflowModes.Ellipsis;
+                element.text.alignment = TextAlignmentOptions.Center;
+                var textRect = element.text.rectTransform;
+                if (textRect != rect && textRect.parent == rect)
+                {
+                    textRect.anchorMin = Vector2.zero;
+                    textRect.anchorMax = Vector2.one;
+                    textRect.offsetMin = new Vector2(6f, 4f);
+                    textRect.offsetMax = new Vector2(-6f, -4f);
+                }
+            }
+        }
+        LayoutRebuilder.MarkLayoutForRebuild(rect.parent as RectTransform);
     }
 
     private ModelProfile CurrentProfile
@@ -342,7 +413,8 @@ public sealed class ModelSettingsUiController
     private string BuildProfileSummary(ModelProfile profile)
     {
         var count = _draft?.Profiles.Count ?? 0;
-        return $"接口档位 {_profileIndex + 1}/{count}：{profile.Name}\n地址：{profile.BaseUrl}\n模型：{profile.Model}\n协议：{BuildProtocolButtonText(profile)}";
+        var name = profile.Name.Length > 40 ? profile.Name[..37] + "..." : profile.Name;
+        return $"接口档位 {_profileIndex + 1}/{count}：{name}";
     }
 
     private static string BuildNetworkButtonText(ModelProfile profile) =>

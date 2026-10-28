@@ -1,7 +1,7 @@
 《自由聊天&议价&交换》Mod - 功能清单与配置说明
 =================================
 
-版本：0.4.2
+版本：0.4.3
 适配游戏：Probably Stolen 正式版 0.46D（AppID 4348910，ModLoader 100-Rev1）
 发布日期：2026-10-29
 
@@ -185,7 +185,7 @@ C:\Users\<用户名>\AppData\LocalLow\Questing Goose Studio\Probably Stolen\AIWo
 
 其中 Config.json 可能包含接口地址、模型名和直接填写的密钥。不要把这个目录或文件发给别人。
 
-工坊上传文件包含 FreeChatBargainBarter.dll、运行依赖、manifest.xml 和头图，不包含个人接口设置、日志或存档。
+工坊上传文件包含 FreeChatBargainBarter.dll、manifest.xml 和头图，不包含个人接口设置、日志或存档。
 
 自由交谈需要把当前人物信息、玩家输入和必要的交易上下文发送到你配置的服务。请自行确认所用服务的隐私政策与计费规则。
 

@@ -1,5 +1,5 @@
 using System.Text;
-using System.Text.Json;
+using Newtonsoft.Json;
 using AIWorldPawnshop.Models.EchoWeave;
 
 namespace AIWorldPawnshop.Orchestration;
@@ -181,7 +181,7 @@ public sealed class IntentLedger
                 continue;
             try
             {
-                var entry = JsonSerializer.Deserialize<IntentLedgerEntry>(
+                var entry = JsonConvert.DeserializeObject<IntentLedgerEntry>(
                     line, EchoWeaveRuntime.JsonOptions(false));
                 if (entry is null || !entry.WorldId.Equals(_worldId, StringComparison.OrdinalIgnoreCase))
                     continue;
@@ -211,7 +211,7 @@ public sealed class IntentLedger
 
         try
         {
-            var line = JsonSerializer.Serialize(entry, EchoWeaveRuntime.JsonOptions(false));
+            var line = JsonConvert.SerializeObject(entry, EchoWeaveRuntime.JsonOptions(false));
             File.AppendAllText(_path, line + Environment.NewLine, Encoding.UTF8);
             _sequence = entry.Sequence;
             _entries.Add(entry);

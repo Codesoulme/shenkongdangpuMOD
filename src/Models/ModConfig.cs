@@ -1,4 +1,4 @@
-using System.Text.Json.Serialization;
+using JsonPropertyName = Newtonsoft.Json.JsonPropertyAttribute;
 
 namespace AIWorldPawnshop.Models;
 

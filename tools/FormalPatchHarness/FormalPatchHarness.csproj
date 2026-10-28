@@ -8,7 +8,6 @@
     <ManagedDir>$(GameDir)\Probably Stolen_Data\Managed</ManagedDir>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="System.Text.Json" Version="8.0.5" />
     <Reference Include="0Harmony, Version=2.4.2.0, Culture=neutral, PublicKeyToken=null">
       <HintPath>$(ManagedDir)\0Harmony.dll</HintPath>
       <SpecificVersion>true</SpecificVersion>

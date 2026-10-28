@@ -1,4 +1,5 @@
-using System.Text.Json.Serialization;
+using JsonConverter = Newtonsoft.Json.JsonConverterAttribute;
+using JsonStringEnumConverter = Newtonsoft.Json.Converters.StringEnumConverter;
 
 namespace AIWorldPawnshop.Models.EchoWeave;
 
