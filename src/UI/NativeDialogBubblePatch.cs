@@ -79,7 +79,7 @@ internal static class NativeDialogEntry
     private const float RetryIntervalSeconds = 0.2f;
     private const float PhoneEntryGap = 12f;
     private const float HeadEntryOffsetX = -19f;
-    private const float HeadEntryOffsetY = 210f;
+    private const float HeadEntryOffsetY = 250f;
     private const float HeadEntryScale = 0.7f;
 
     private static float _nextRetryTime;
