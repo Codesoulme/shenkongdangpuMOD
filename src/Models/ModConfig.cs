@@ -2,7 +2,7 @@ using System.Text.Json.Serialization;
 
 namespace AIWorldPawnshop.Models;
 
-public sealed class ModConfig
+public sealed class WorldModConfig
 {
     [JsonPropertyName("enabled")]
     public bool Enabled { get; set; } = true;
@@ -79,9 +79,9 @@ public sealed class ModConfig
         AllowNetwork = profile.AllowNetwork;
     }
 
-    public ModConfig Clone()
+    public WorldModConfig Clone()
     {
-        var clone = new ModConfig
+        var clone = new WorldModConfig
         {
             Enabled = Enabled,
             Provider = Provider,
@@ -140,7 +140,7 @@ public sealed class ModelProfile
     [JsonPropertyName("allow_network")]
     public bool AllowNetwork { get; set; }
 
-    public static ModelProfile FromLegacy(ModConfig config)
+    public static ModelProfile FromLegacy(WorldModConfig config)
     {
         return new ModelProfile
         {

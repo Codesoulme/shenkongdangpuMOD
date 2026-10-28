@@ -2,7 +2,6 @@ using System.Globalization;
 using AIWorldPawnshop.Model;
 using AIWorldPawnshop.Models;
 using AIWorldPawnshop.Runtime;
-using Il2Cpp;
 using MelonLoader;
 using UnityEngine;
 
@@ -16,7 +15,7 @@ public sealed class ModelSettingsUiController
     private const string ProtocolButtonId = "protocol";
 
     private CustomUIWindow? _window;
-    private ModConfig? _draft;
+    private WorldModConfig? _draft;
     private int _profileIndex;
     private string _timeoutText = string.Empty;
     private string _maxTokensText = string.Empty;
@@ -357,7 +356,7 @@ public sealed class ModelSettingsUiController
             _ => "协议：自动"
         };
 
-    private static int FindActiveProfileIndex(ModConfig config)
+    private static int FindActiveProfileIndex(WorldModConfig config)
     {
         var index = config.Profiles.FindIndex(profile =>
             profile.Id.Equals(config.ActiveProfileId, StringComparison.OrdinalIgnoreCase));

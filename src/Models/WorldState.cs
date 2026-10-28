@@ -6,7 +6,7 @@ public sealed class WorldState
     public string RulesVersion { get; set; } = "0.3";
     public string WorldId { get; set; } = Guid.NewGuid().ToString("N");
     public int CurrentDay { get; set; }
-    public int WorldSeed { get; set; } = Random.Shared.Next();
+    public int WorldSeed { get; set; } = RuntimeCompat.NewWorldSeed();
     /// <summary>
     /// Monotonic revision for extension-side snapshots. It changes only after
     /// a world mutation is accepted, so stale async responses can be rejected.

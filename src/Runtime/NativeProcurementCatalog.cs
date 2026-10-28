@@ -1,7 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
+using AIWorldPawnshop.Compatibility;
 using AIWorldPawnshop.Models;
-using Il2Cpp;
 
 namespace AIWorldPawnshop.Runtime;
 
@@ -115,22 +115,10 @@ internal static class NativeProcurementCatalog
         if (string.IsNullOrWhiteSpace(tableId))
             return new List<ProcurementItemCandidate>();
 
-        Safe(() =>
-        {
-            LootRegistry.RebuildIfDirty();
-            return true;
-        }, false);
-
-        Il2CppSystem.Collections.Generic.List<LootEntry>? entries = null;
-        var tables = LootRegistry.tables;
-        if (tables is not null)
-            tables.TryGetValue(tableId, out entries);
-        if (entries is null)
-        {
-            var vanillaTables = LootRegistry.vanillaTables;
-            if (vanillaTables is not null)
-                vanillaTables.TryGetValue(tableId, out entries);
-        }
+        FormalGameAccess.RebuildLootRegistry();
+        var entries = Safe(
+            () => LootRegistry.GetTableEntries(tableId),
+            null as System.Collections.Generic.List<LootEntry>);
         if (entries is null)
             return new List<ProcurementItemCandidate>();
 
@@ -250,7 +238,7 @@ internal static class NativeProcurementCatalog
 
     private static double StableFraction(string seed)
     {
-        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(seed));
+        var hash = RuntimeCompat.HashSha256(Encoding.UTF8.GetBytes(seed));
         var value = ((ulong)hash[0] << 56) |
                     ((ulong)hash[1] << 48) |
                     ((ulong)hash[2] << 40) |

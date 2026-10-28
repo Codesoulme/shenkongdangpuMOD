@@ -1,7 +1,7 @@
 using System.Diagnostics;
+using AIWorldPawnshop.Compatibility;
 using AIWorldPawnshop.Models;
 using AIWorldPawnshop.Runtime;
-using Il2Cpp;
 using MelonLoader;
 using UnityEngine;
 
@@ -327,10 +327,10 @@ public sealed class ChatUiController
                     var phoneManager = PhoneUIManager.Instance;
                     var localizedName = phone.GetLocalizedDisplayName();
                     var phoneName = string.IsNullOrWhiteSpace(localizedName)
-                        ? $"电话 {phoneManager?.currentNumber}"
+                        ? $"电话 {FormalGameAccess.GetPhoneNumber(phoneManager)}"
                         : localizedName;
                     var phoneKey = string.IsNullOrWhiteSpace(phone.dialogFuncId)
-                        ? $"phone:{phoneManager?.currentNumber}"
+                        ? $"phone:{FormalGameAccess.GetPhoneNumber(phoneManager)}"
                         : $"phone:{phone.dialogFuncId}";
                     return new ConversationSpeaker(phoneKey, phoneName);
                 }
@@ -344,7 +344,7 @@ public sealed class ChatUiController
             }
 
             var instance = PlayerStore.Instance?.currentClientInstance;
-            var client = instance?.GetClientBlueprint() ?? instance?.storeClient;
+            var client = FormalGameAccess.GetClient(instance);
             if (client is not null)
             {
                 var key = string.IsNullOrWhiteSpace(client.identifier)

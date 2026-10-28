@@ -19,30 +19,30 @@ public sealed class JsonFileStore
     public JsonFileStore(string root)
     {
         _root = root;
-        Directory.CreateDirectory(_root);
-        Directory.CreateDirectory(Path.Combine(_root, "Worlds"));
-        Directory.CreateDirectory(Path.Combine(_root, "Logs"));
+        System.IO.Directory.CreateDirectory(_root);
+        System.IO.Directory.CreateDirectory(Path.Combine(_root, "Worlds"));
+        System.IO.Directory.CreateDirectory(Path.Combine(_root, "Logs"));
     }
 
-    public ModConfig LoadConfig()
+    public WorldModConfig LoadConfig()
     {
         var path = Path.Combine(_root, "Config.json");
         if (!File.Exists(path))
         {
-            var defaults = new ModConfig();
+            var defaults = new WorldModConfig();
             defaults.Normalize();
             defaults.SyncLegacyFieldsFromActive();
             Save(path, defaults);
             return defaults;
         }
 
-        var config = Read<ModConfig>(path) ?? new ModConfig();
+        var config = Read<WorldModConfig>(path) ?? new WorldModConfig();
         config.Normalize();
         config.SyncLegacyFieldsFromActive();
         return config;
     }
 
-    public void SaveConfig(ModConfig config)
+    public void SaveConfig(WorldModConfig config)
     {
         config.Normalize();
         config.SyncLegacyFieldsFromActive();
@@ -246,7 +246,7 @@ public sealed class JsonFileStore
             File.WriteAllText(temp, JsonSerializer.Serialize(value, _options));
             if (File.Exists(path) && !_recoveredPaths.Contains(path))
                 File.Copy(path, path + ".bak", true);
-            File.Move(temp, path, true);
+            RuntimeCompat.MoveReplace(temp, path);
             _recoveredPaths.Remove(path);
             return true;
         }

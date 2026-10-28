@@ -98,7 +98,7 @@ internal static class BargainScopeResolver
         return null;
     }
 
-    public static IReadOnlySet<int> SelectTargetIds(
+    public static ISet<int> SelectTargetIds(
         string scope,
         IReadOnlyCollection<int> snapshotIds,
         int currentItemId,

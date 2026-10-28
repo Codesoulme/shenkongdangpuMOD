@@ -1,5 +1,5 @@
 using HarmonyLib;
-using Il2Cpp;
+using AIWorldPawnshop.Compatibility;
 using AIWorldPawnshop.Runtime;
 using System.Diagnostics;
 
@@ -29,7 +29,7 @@ internal static class PlayerStoreEndNightPatch
 internal static class StoreEventManagerNewsProjectionPatch
 {
     private static void Postfix(
-        ref Il2CppSystem.Collections.Generic.List<StoreEvent> __result)
+        ref System.Collections.Generic.List<StoreEvent> __result)
     {
         try
         {
@@ -235,12 +235,9 @@ internal static class PlayerStoreDismissClientPatch
         __state = null;
         try
         {
-            __state = __instance.currentClientInstance?.GetClientBlueprint();
+            __state = FormalGameAccess.GetClient(__instance.currentClientInstance);
         }
-        catch
-        {
-            __state = __instance.currentClientInstance?.storeClient;
-        }
+        catch { }
     }
 
     private static void Postfix(StoreClient? __state)

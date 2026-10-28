@@ -259,7 +259,7 @@ public sealed class LocalFallbackEngine
     {
         if (exclusiveMax <= 1)
             return 0;
-        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(seed));
+        var hash = RuntimeCompat.HashSha256(Encoding.UTF8.GetBytes(seed));
         var value = ((uint)hash[0] << 24) |
                     ((uint)hash[1] << 16) |
                     ((uint)hash[2] << 8) |

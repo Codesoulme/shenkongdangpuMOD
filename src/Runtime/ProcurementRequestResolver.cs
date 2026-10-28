@@ -341,7 +341,7 @@ internal static class ProcurementRequestResolver
     {
         var result = string.IsNullOrWhiteSpace(value)
             ? string.Empty
-            : value.ReplaceLineEndings(" ").Trim();
+            : RuntimeCompat.SingleLine(value).Trim();
         return result.Length > maxLength ? result[..maxLength] : result;
     }
 }

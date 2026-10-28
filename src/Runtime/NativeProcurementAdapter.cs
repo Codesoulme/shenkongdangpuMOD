@@ -1,7 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
+using AIWorldPawnshop.Compatibility;
 using AIWorldPawnshop.Models;
-using Il2Cpp;
 using MelonLoader;
 
 namespace AIWorldPawnshop.Runtime;
@@ -252,7 +252,8 @@ internal static class NativeProcurementAdapter
 
         if (!request.Status.Equals("found", StringComparison.OrdinalIgnoreCase))
             return false;
-        if (client is null || instance?.gridInv is null)
+        var inventory = FormalGameAccess.GetInventory(instance);
+        if (client is null || inventory is null)
         {
             request.Status = "failed";
             request.OutcomeSummary = "顾客回访实例没有可用物品栏，委托未能交付。";
@@ -263,7 +264,7 @@ internal static class NativeProcurementAdapter
         try
         {
             item = NativeProcurementCatalog.CreateItem(request);
-            if (item is null || !TryAddToClientInventory(instance.gridInv, item))
+            if (item is null || !TryAddToClientInventory(inventory, item))
             {
                 RestoreIntent(client, request.OriginalIntent);
                 item?.Destroy();
@@ -502,7 +503,7 @@ internal static class NativeProcurementAdapter
     {
         var input = Encoding.UTF8.GetBytes(
             $"{world.WorldSeed}:{request.RequestKey}:{request.DueDay}:{request.Category}");
-        var hash = SHA256.HashData(input);
+        var hash = RuntimeCompat.HashSha256(input);
         var value = ((uint)hash[0] << 24) |
                     ((uint)hash[1] << 16) |
                     ((uint)hash[2] << 8) |
@@ -517,15 +518,13 @@ internal static class NativeProcurementAdapter
             slot.AcceptUnchecked();
         else
         {
-            var forcedItems = new Il2CppSystem.Collections.Generic.List<GameItem>();
+            var forcedItems = new System.Collections.Generic.List<GameItem>();
             forcedItems.Add(item);
             ((GameInventory)inventory).UncheckedAcceptAll(forcedItems);
         }
 
         inventory.Validate();
-        var items = inventory.items;
-        if (items is null)
-            return false;
+        var items = FormalGameAccess.GetItems(inventory);
         for (var i = 0; i < items.Count; i++)
         {
             if (items[i] is not null && items[i].uniqueId == item.uniqueId)

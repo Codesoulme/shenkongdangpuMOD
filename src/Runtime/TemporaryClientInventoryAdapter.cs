@@ -1,7 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
+using AIWorldPawnshop.Compatibility;
 using AIWorldPawnshop.Models;
-using Il2Cpp;
 using MelonLoader;
 
 namespace AIWorldPawnshop.Runtime;
@@ -20,7 +20,8 @@ internal static class TemporaryClientInventoryAdapter
         StoreClient? client,
         StoreClientInstance? instance)
     {
-        if (client is null || instance?.gridInv is null ||
+        var inventory = FormalGameAccess.GetInventory(instance);
+        if (client is null || inventory is null ||
             client.clientIntent != StoreClient.ClientIntent.BUY)
             return false;
 
@@ -84,7 +85,7 @@ internal static class TemporaryClientInventoryAdapter
                 continue;
             request.ResolvedItemKey = plan.ItemKey;
             var item = NativeProcurementCatalog.CreateItem(request);
-            if (item is null || !NativeProcurementAdapter.TryAddToClientInventory(instance.gridInv, item))
+            if (item is null || !NativeProcurementAdapter.TryAddToClientInventory(inventory, item))
             {
                 try { item?.Destroy(); } catch { }
                 continue;
@@ -115,8 +116,9 @@ internal static class TemporaryClientInventoryAdapter
         {
             var playerStore = PlayerStore.Instance;
             var instance = playerStore?.currentClientInstance;
-            var client = instance?.GetClientBlueprint() ?? instance?.storeClient;
-            if (playerStore is null || client is null || instance?.gridInv?.items is null)
+            var client = FormalGameAccess.GetClient(instance);
+            var inventory = FormalGameAccess.GetInventory(instance);
+            if (playerStore is null || client is null || inventory is null)
                 return Result(true, false, "原版来客已经离开");
 
             var clientKey = FirstNotBlank(client.identifier, client.displayName);
@@ -133,8 +135,9 @@ internal static class TemporaryClientInventoryAdapter
                 x.OriginalClientIdentifier.Equals(clientKey, StringComparison.OrdinalIgnoreCase));
             var ownership = CounterOwnershipSnapshot.Capture(playerStore, instance);
             var candidates = new List<GameItem>();
-            for (var i = 0; i < instance.gridInv.items.Count; i++)
-                AddUnique(candidates, instance.gridInv.items[i]);
+            var carriedItems = FormalGameAccess.GetItems(inventory);
+            for (var i = 0; i < carriedItems.Count; i++)
+                AddUnique(candidates, carriedItems[i]);
             foreach (var item in ownership.ClientCounterItems)
                 AddUnique(candidates, item);
 
@@ -254,7 +257,7 @@ internal static class TemporaryClientInventoryAdapter
     {
         if (exclusiveMax <= 1)
             return 0;
-        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(seed));
+        var hash = RuntimeCompat.HashSha256(Encoding.UTF8.GetBytes(seed));
         var value = ((uint)hash[0] << 24) | ((uint)hash[1] << 16) | ((uint)hash[2] << 8) | hash[3];
         return (int)(value % (uint)exclusiveMax);
     }

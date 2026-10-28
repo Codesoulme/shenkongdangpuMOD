@@ -1,4 +1,4 @@
-using Il2Cpp;
+using AIWorldPawnshop.Compatibility;
 using MelonLoader;
 
 namespace AIWorldPawnshop.Runtime;
@@ -78,7 +78,7 @@ internal static class BargainAgreementRegistry
     public static IReadOnlyList<(string FeatureId, List<int> ItemIds)> Revoke(
         string clientKey,
         string direction,
-        IReadOnlySet<int> targetIds,
+        ISet<int> targetIds,
         bool includeFuture)
     {
         var matches = Agreements
@@ -181,7 +181,7 @@ internal static class BargainAgreementRegistry
     private static StoreClient? ResolveCurrentClient()
     {
         var instance = PlayerStore.Instance?.currentClientInstance;
-        return instance?.GetClientBlueprint() ?? instance?.storeClient;
+        return FormalGameAccess.GetClient(instance);
     }
 
     private static bool IsActiveTradeItem(GameItem item, string direction)

@@ -1,6 +1,6 @@
 using AIWorldPawnshop.Models;
+using AIWorldPawnshop.Compatibility;
 using AIWorldPawnshop.GM;
-using Il2Cpp;
 using MelonLoader;
 
 namespace AIWorldPawnshop.Runtime;
@@ -101,14 +101,7 @@ internal static class NativeConversationContextBuilder
         var client = explicitClient;
         if (client is null && instance is not null)
         {
-            try
-            {
-                client = instance.GetClientBlueprint();
-            }
-            catch
-            {
-                client = instance.storeClient;
-            }
+            client = FormalGameAccess.GetClient(instance);
         }
 
         if (client is null)
@@ -169,7 +162,7 @@ internal static class NativeConversationContextBuilder
             character.Key = FirstNotBlank(
                 fallbackKey,
                 $"phone:{phone.dialogFuncId}",
-                $"phone:{phoneManager?.currentNumber}");
+                $"phone:{FormalGameAccess.GetPhoneNumber(phoneManager)}");
             character.DisplayName = FirstNotBlank(localizedName, phone.displayName, fallbackName);
             character.OriginalIdentifier = phone.dialogFuncId ?? string.Empty;
             character.OriginalRealName = phone.displayName ?? string.Empty;
@@ -521,7 +514,7 @@ internal static class NativeConversationContextBuilder
         WorldState world)
     {
         trade.ClientCash = client.clientCash;
-        trade.ClientBudget = client.useClientBudget ? client.clientBudget : null;
+        trade.ClientBudget = client.useClientBudget ? FormalGameAccess.GetClientBudget(client) : null;
         trade.ClientBuyPriceModifier = client.buyPriceModifier;
         trade.ClientSellPriceModifier = client.sellPriceModifier;
         trade.ClientImpatience = client.clientImpatience;
@@ -621,10 +614,9 @@ internal static class NativeConversationContextBuilder
         WorldState world,
         CounterOwnershipSnapshot ownership)
     {
-        var items = instance?.gridInv?.items;
+        var items = FormalGameAccess.GetItems(FormalGameAccess.GetInventory(instance));
         var countSeen = new HashSet<int>();
         var clientInventoryCount = 0;
-        if (items is not null)
         {
             for (var i = 0; i < items.Count; i++)
             {
@@ -644,7 +636,6 @@ internal static class NativeConversationContextBuilder
             () => NegociationUIManager.Instance?.currentNegociatedItem?.uniqueId ?? 0,
             0);
         var seen = new HashSet<int>();
-        if (items is not null)
         {
             for (var i = 0; i < items.Count && trade.ClientCarriedItems.Count < MaxClientInventoryItems; i++)
             {
@@ -767,8 +758,8 @@ internal static class NativeConversationContextBuilder
             }
         }
 
-        var clientItems = playerStore?.currentClientInstance?.gridInv?.items;
-        if (clientItems is not null)
+        var clientItems = FormalGameAccess.GetItems(
+            FormalGameAccess.GetInventory(playerStore?.currentClientInstance));
         {
             for (var i = 0; i < clientItems.Count; i++)
             {
@@ -827,8 +818,8 @@ internal static class NativeConversationContextBuilder
                 if (feature is null || feature.isDisabled)
                     continue;
 
-                var exposed = Safe(() => feature.IsExposed(), feature.isFeatureExposed);
-                var discovered = Safe(() => feature.IsFeatureDiscovered(), feature.isFeatureDiscovered);
+                var exposed = FormalGameAccess.IsFeatureExposed(feature);
+                var discovered = FormalGameAccess.IsFeatureDiscovered(feature);
                 var canDetect = Safe(() => client.CanClientExposeThisFeature(feature), false);
                 var known = exposed || discovered || canDetect;
                 allRelevantFeaturesKnown &= known;
@@ -836,10 +827,10 @@ internal static class NativeConversationContextBuilder
                 {
                     Category = FirstNotBlank(feature.category, feature.identifier),
                     PublicDescription = Clean(
-                        Safe(() => feature.GetPublicDisplay(), feature.publicDisplay ?? string.Empty),
+                        FormalGameAccess.GetPublicDisplay(feature),
                         160),
                     CharacterKnownDescription = known
-                        ? Clean(Safe(() => feature.GetActualDisplay(), feature.actualDisplay ?? string.Empty), 160)
+                        ? Clean(FormalGameAccess.GetActualDisplay(feature), 160)
                         : string.Empty,
                     Exposed = exposed,
                     Discovered = discovered,
@@ -1022,8 +1013,7 @@ internal static class NativeConversationContextBuilder
     {
         try
         {
-            var originalEvents = StoreStation.Instance?.storeEventManager?.activeEvents;
-            if (originalEvents is not null)
+            var originalEvents = FormalGameAccess.GetActiveEvents(StoreStation.Instance?.storeEventManager);
             {
                 for (var i = 0; i < originalEvents.Count && context.ActiveWorldEvents.Count < MaxWorldEvents; i++)
                 {
@@ -1068,7 +1058,7 @@ internal static class NativeConversationContextBuilder
     }
 
     private static bool Contains(
-        Il2CppSystem.Collections.Generic.List<string>? values,
+        System.Collections.Generic.List<string>? values,
         string target)
     {
         if (values is null || string.IsNullOrWhiteSpace(target))
@@ -1083,7 +1073,7 @@ internal static class NativeConversationContextBuilder
         return false;
     }
 
-    private static List<string> CopyStrings(Il2CppSystem.Collections.Generic.List<string>? source)
+    private static List<string> CopyStrings(System.Collections.Generic.List<string>? source)
     {
         var result = new List<string>();
         if (source is null)
@@ -1109,7 +1099,7 @@ internal static class NativeConversationContextBuilder
     {
         var result = string.IsNullOrWhiteSpace(value)
             ? string.Empty
-            : value.ReplaceLineEndings(" ").Trim();
+            : RuntimeCompat.SingleLine(value).Trim();
         return result.Length > maxLength ? result[..maxLength] : result;
     }
 

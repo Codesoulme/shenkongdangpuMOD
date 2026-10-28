@@ -25,7 +25,7 @@ public sealed class IntentLedger
         if (string.IsNullOrWhiteSpace(worldId))
             throw new ArgumentException("World id cannot be empty.", nameof(worldId));
 
-        Directory.CreateDirectory(dataRoot);
+        System.IO.Directory.CreateDirectory(dataRoot);
         _path = Path.Combine(dataRoot, "EchoWeaveLedger.jsonl");
         _worldId = worldId;
         Load();
@@ -48,7 +48,7 @@ public sealed class IntentLedger
 
     public bool TryPropose(IntentRecord intent, string kind, string summary)
     {
-        ArgumentNullException.ThrowIfNull(intent);
+        RuntimeCompat.Require(intent, nameof(intent));
         if (string.IsNullOrWhiteSpace(intent.DeduplicationKey))
             throw new ArgumentException("An intent must have a deduplication key.", nameof(intent));
 
@@ -147,7 +147,7 @@ public sealed class IntentLedger
 
     public bool Append(IntentLedgerEntry entry)
     {
-        ArgumentNullException.ThrowIfNull(entry);
+        RuntimeCompat.Require(entry, nameof(entry));
         lock (_sync)
             return AppendLocked(entry);
     }

@@ -1,5 +1,5 @@
 using AIWorldPawnshop.Models;
-using Il2Cpp;
+using AIWorldPawnshop.Compatibility;
 using MelonLoader;
 
 namespace AIWorldPawnshop.Runtime;
@@ -65,7 +65,7 @@ internal static class NativeWalletAdapter
         {
             var playerStore = PlayerStore.Instance;
             var instance = playerStore?.currentClientInstance;
-            var client = instance?.GetClientBlueprint() ?? instance?.storeClient;
+            var client = FormalGameAccess.GetClient(instance);
             var liveKey = FirstNotBlank(client?.identifier, client?.displayName);
             if (playerStore is null || client is null ||
                 !liveKey.Equals(pending.ClientKey, StringComparison.OrdinalIgnoreCase))
@@ -100,7 +100,7 @@ internal static class NativeWalletAdapter
         {
             var playerStore = PlayerStore.Instance;
             var instance = playerStore?.currentClientInstance;
-            var client = instance?.GetClientBlueprint() ?? instance?.storeClient;
+            var client = FormalGameAccess.GetClient(instance);
             var liveKey = FirstNotBlank(client?.identifier, client?.displayName);
             return client is not null && client.useClientBudget &&
                    liveKey.Equals(clientKey, StringComparison.OrdinalIgnoreCase) &&
@@ -130,7 +130,7 @@ internal static class NativeWalletAdapter
         {
             var playerStore = PlayerStore.Instance;
             var instance = playerStore?.currentClientInstance;
-            var client = instance?.GetClientBlueprint() ?? instance?.storeClient;
+            var client = FormalGameAccess.GetClient(instance);
             if (playerStore is null || client is null)
                 return Result(true, false, proposal.Amount, "原版来客已经离开");
 
@@ -186,7 +186,7 @@ internal static class NativeWalletAdapter
         {
             var playerStore = PlayerStore.Instance;
             var instance = playerStore?.currentClientInstance;
-            var client = instance?.GetClientBlueprint() ?? instance?.storeClient;
+            var client = FormalGameAccess.GetClient(instance);
             if (playerStore is null || client is null)
                 return Result(true, false, proposal.Amount, "原版来客已经离开");
 

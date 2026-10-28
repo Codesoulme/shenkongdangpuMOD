@@ -1,7 +1,6 @@
 using System.Security.Cryptography;
 using System.Text.Json;
 using AIWorldPawnshop.Models;
-using Il2Cpp;
 using MelonLoader;
 
 namespace AIWorldPawnshop.Runtime;
@@ -63,12 +62,12 @@ public static class GameSourceFingerprint
         AddIfExists(files, Path.Combine(data, "globalgamemanagers.assets"));
         var addressables = Path.Combine(data, "StreamingAssets", "aa");
         AddIfExists(files, Path.Combine(addressables, "catalog.json"));
-        if (Directory.Exists(addressables))
-            files.AddRange(Directory.EnumerateFiles(addressables, "*.bundle", SearchOption.AllDirectories));
-        if (Directory.Exists(data))
+        if (System.IO.Directory.Exists(addressables))
+            files.AddRange(System.IO.Directory.EnumerateFiles(addressables, "*.bundle", SearchOption.AllDirectories));
+        if (System.IO.Directory.Exists(data))
         {
-            files.AddRange(Directory.EnumerateFiles(data, "sharedassets*.assets"));
-            files.AddRange(Directory.EnumerateFiles(data, "level*"));
+            files.AddRange(System.IO.Directory.EnumerateFiles(data, "sharedassets*.assets"));
+            files.AddRange(System.IO.Directory.EnumerateFiles(data, "level*"));
         }
         if (files.Count == 0)
             throw new FileNotFoundException("没有找到原版资源文件", gameDirectory);
@@ -96,8 +95,8 @@ public static class GameSourceFingerprint
             });
         }
         var content = string.Join("\n", result.Files.Select(x => $"{x.Path}|{x.Hash}"));
-        result.Fingerprint = Convert.ToHexString(
-            SHA256.HashData(System.Text.Encoding.UTF8.GetBytes($"{GameKnowledgeCatalog.Schema}\n{content}")));
+        result.Fingerprint = RuntimeCompat.ToHex(
+            RuntimeCompat.HashSha256(System.Text.Encoding.UTF8.GetBytes($"{GameKnowledgeCatalog.Schema}\n{content}")));
         return result;
     }
 
@@ -111,7 +110,7 @@ public static class GameSourceFingerprint
     {
         using var stream = File.OpenRead(path);
         using var sha = SHA256.Create();
-        return Convert.ToHexString(sha.ComputeHash(stream));
+        return RuntimeCompat.ToHex(sha.ComputeHash(stream));
     }
 }
 
@@ -151,9 +150,9 @@ public sealed class GameKnowledgeCatalog
                 if (_snapshot.Schema != Schema || _snapshot.Fingerprint != current.Fingerprint)
                     _building = current;
                 else if (_snapshot.Files.Count != current.Files.Count ||
-                         _snapshot.Files.Zip(current.Files).Any(x =>
-                             x.First.Length != x.Second.Length ||
-                             x.First.WriteTicks != x.Second.WriteTicks))
+                         _snapshot.Files.Zip(current.Files, (previous, latest) =>
+                             previous.Length != latest.Length ||
+                             previous.WriteTicks != latest.WriteTicks).Any(changed => changed))
                 {
                     _snapshot.Files = current.Files;
                     _dirty = true;
@@ -321,7 +320,7 @@ public sealed class GameKnowledgeCatalog
         try
         {
             File.WriteAllText(temporary, JsonSerializer.Serialize(_snapshot));
-            File.Move(temporary, _path, true);
+            RuntimeCompat.MoveReplace(temporary, _path);
             _dirty = false;
         }
         catch (Exception ex)
@@ -360,7 +359,7 @@ public sealed class GameKnowledgeCatalog
 
     private static string Clean(string? value, int maxLength)
     {
-        var text = value?.ReplaceLineEndings(" ").Trim() ?? string.Empty;
+        var text = value is null ? string.Empty : RuntimeCompat.SingleLine(value).Trim();
         return text.Length <= maxLength ? text : text[..maxLength];
     }
 }

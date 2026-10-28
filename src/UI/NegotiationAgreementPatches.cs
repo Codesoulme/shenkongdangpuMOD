@@ -1,6 +1,6 @@
 using AIWorldPawnshop.Runtime;
 using HarmonyLib;
-using Il2Cpp;
+using AIWorldPawnshop.Compatibility;
 
 namespace AIWorldPawnshop.UI;
 
@@ -11,16 +11,16 @@ internal static class NegotiationAgreementItemUiPatch
 
     private static void Postfix(NegociationUIManager __instance, GameItem gameItem)
     {
-        var body = __instance.bodyTMP;
-        if (body is null)
+        var header = FormalGameAccess.GetNegotiationSubtitle(__instance);
+        if (header is null)
             return;
 
-        var text = body.text ?? string.Empty;
+        var text = header.text ?? string.Empty;
         var markerIndex = text.IndexOf(Marker, StringComparison.Ordinal);
         if (markerIndex >= 0)
             text = text[..markerIndex];
         var section = BargainAgreementRegistry.BuildUiSection(gameItem);
-        body.text = text + section;
+        header.text = text + section;
     }
 }
 

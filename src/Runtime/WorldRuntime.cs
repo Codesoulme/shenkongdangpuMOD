@@ -7,7 +7,6 @@ using AIWorldPawnshop.Orchestration;
 using AIWorldPawnshop.Model;
 using AIWorldPawnshop.Storage;
 using AIWorldPawnshop.GM;
-using Il2Cpp;
 using MelonLoader;
 
 namespace AIWorldPawnshop.Runtime;
@@ -26,7 +25,7 @@ public sealed class WorldRuntime
     private readonly ConcurrentDictionary<string, EchoWeaveSnapshot> _turnSnapshots =
         new(StringComparer.OrdinalIgnoreCase);
 
-    public ModConfig Config { get; private set; }
+    public WorldModConfig Config { get; private set; }
     public WorldState State { get; private set; }
     public EchoWeaveRuntime EchoWeave => _echoWeave;
     // Public name for the current orchestration layer; EchoWeave remains as a save-format compatibility alias.
@@ -223,7 +222,7 @@ public sealed class WorldRuntime
             .ConfigureAwait(false);
     }
 
-    public void ApplyConfig(ModConfig config)
+    public void ApplyConfig(WorldModConfig config)
     {
         Config = config.Clone();
         Config.Normalize();
@@ -1231,7 +1230,7 @@ public sealed class WorldRuntime
     private string ResolveWorldId()
     {
         var marker = Path.Combine(_dataRoot, "world-id.txt");
-        Directory.CreateDirectory(Path.GetDirectoryName(marker)!);
+        System.IO.Directory.CreateDirectory(Path.GetDirectoryName(marker)!);
         if (File.Exists(marker))
             return File.ReadAllText(marker).Trim();
 

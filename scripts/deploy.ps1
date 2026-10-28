@@ -1,13 +1,14 @@
 param(
-    [string]$GameDir = "E:\SteamLibrary\steamapps\common\Probably Stolen Demo",
+    [string]$GameDir = "E:\SteamLibrary\steamapps\common\Probably Stolen",
     [string]$DataDir = "$env:USERPROFILE\AppData\LocalLow\Questing Goose Studio\Probably Stolen\AIWorldPawnshop",
     [string]$Configuration = "Release"
 )
 
 $ErrorActionPreference = "Stop"
 $projectRoot = Split-Path -Parent $PSScriptRoot
-$dll = Join-Path $projectRoot "bin\$Configuration\net6.0\AIWorldPawnshop.dll"
-$modsDir = Join-Path $GameDir "Mods"
+$buildDir = Join-Path $projectRoot "bin\$Configuration\netstandard2.1"
+$dll = Join-Path $buildDir "FreeChatBargainBarter.dll"
+$modsDir = Join-Path $GameDir "Mods\FreeChatBargainBarter"
 $dataDir = $DataDir
 
 if (-not (Test-Path $dll)) {
@@ -15,7 +16,12 @@ if (-not (Test-Path $dll)) {
 }
 
 New-Item -ItemType Directory -Force -Path $modsDir, $dataDir, (Join-Path $dataDir "Logs") | Out-Null
-Copy-Item -LiteralPath $dll -Destination (Join-Path $modsDir "AIWorldPawnshop.dll") -Force
+Get-ChildItem -LiteralPath $buildDir -Filter "*.dll" -File |
+    Copy-Item -Destination $modsDir -Force
+Copy-Item -LiteralPath (Join-Path $projectRoot "manifest.xml") -Destination (Join-Path $modsDir "manifest.xml") -Force
+if (Test-Path (Join-Path $projectRoot "Content\preview.png")) {
+    Copy-Item -LiteralPath (Join-Path $projectRoot "Content\preview.png") -Destination (Join-Path $modsDir "preview.png") -Force
+}
 $configTarget = Join-Path $dataDir "Config.json"
 $contentTarget = Join-Path $dataDir "LocalContent.json"
 if (-not (Test-Path $configTarget)) {

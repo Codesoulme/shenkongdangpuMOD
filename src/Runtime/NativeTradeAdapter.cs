@@ -1,5 +1,5 @@
 using AIWorldPawnshop.Models;
-using Il2Cpp;
+using AIWorldPawnshop.Compatibility;
 using MelonLoader;
 
 namespace AIWorldPawnshop.Runtime;
@@ -43,7 +43,7 @@ internal static class NativeTradeAdapter
         {
             var playerStore = PlayerStore.Instance;
             var instance = playerStore?.currentClientInstance;
-            var client = instance?.GetClientBlueprint() ?? instance?.storeClient;
+            var client = FormalGameAccess.GetClient(instance);
             var bargain = BargainUIManager.Instance;
             var negotiation = NegociationUIManager.Instance;
             var item = negotiation?.currentNegociatedItem ?? playerStore?.currentNegociatedItem;
@@ -187,7 +187,7 @@ internal static class NativeTradeAdapter
                 (expectedItemKey is null || item.uniqueId != expectedItemKey.Value))
                 return Result(true, false, proposal, "回复期间柜台物品已经改变");
 
-            var trackedClient = bargain.trackedClient;
+            var trackedClient = FormalGameAccess.GetTrackedClient(bargain);
             if (trackedClient is not null)
             {
                 var trackedKey = FirstNotBlank(trackedClient.identifier, trackedClient.displayName);
@@ -275,7 +275,7 @@ internal static class NativeTradeAdapter
             var offerItem = allAffectedItems
                 .FirstOrDefault(candidate => targetIds.Contains(candidate.uniqueId)) ?? item;
             var previousOffer = ReadOfferValue(negotiation, offerItem);
-            var previousBudget = client.useClientBudget ? client.clientBudget : (int?)null;
+            var previousBudget = client.useClientBudget ? FormalGameAccess.GetClientBudget(client) : (int?)null;
             Invoke(bargain, proposal.Kind, proposal.Percent);
             var finalOffer = ReadOfferValue(
                 NegociationUIManager.Instance ?? negotiation,
@@ -384,12 +384,12 @@ internal static class NativeTradeAdapter
                 bargain.DiscountOffered && bargain.DiscountPercent == percent,
             "ask_markup" =>
                 bargain.MarkupOffered && bargain.MarkupPercent == percent &&
-                bargain.markupApplied,
+                FormalGameAccess.GetMarkupApplied(bargain),
             "offer_buying_markup" =>
                 bargain.BuyingMarkupOffered && bargain.BuyingMarkupPercent == percent,
             "ask_buying_discount" =>
                 bargain.BuyingDiscountOffered && bargain.BuyingDiscountPercent == percent &&
-                bargain.buyingDiscountApplied,
+                FormalGameAccess.GetBuyingDiscountApplied(bargain),
             _ => false
         };
 
@@ -501,7 +501,8 @@ internal static class NativeTradeAdapter
             if (direction == "player_sells_to_client")
                 return new List<GameItem> { currentItem };
 
-            var clientItems = playerStore.currentClientInstance?.gridInv?.items;
+            var clientItems = FormalGameAccess.GetItems(
+                FormalGameAccess.GetInventory(playerStore.currentClientInstance));
             return DistinctItems(clientItems, currentItem);
         }
         catch
@@ -511,7 +512,7 @@ internal static class NativeTradeAdapter
     }
 
     private static List<GameItem> DistinctItems(
-        Il2CppSystem.Collections.Generic.List<GameItem>? items,
+        System.Collections.Generic.IReadOnlyList<GameItem>? items,
         GameItem currentItem)
     {
         var result = new List<GameItem>();
@@ -583,7 +584,7 @@ internal static class NativeTradeAdapter
 
     private static void NarrowAppliedFeature(
         IReadOnlyCollection<GameItem> items,
-        IReadOnlySet<int> targetIds,
+        ISet<int> targetIds,
         string featureId,
         string kind,
         int percent)

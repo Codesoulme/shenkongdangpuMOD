@@ -1,12 +1,12 @@
-# 当铺世界 Mod
+# 《自由聊天&议价&交换》Mod
 
-目标版本：Probably Stolen Demo 0.46D
+目标版本：Probably Stolen 正式版（AppID 4348910，ModLoader 100-Rev1）
 
 v2 架构设计：GM 系统（旧版设计文档仍保留历史名称）
 
 当前实现的模块与数据流见 [Mod 架构图](docs/Architecture_zh-CN.md)。
 
-这是一个独立的 MelonLoader Mod 工程。当前运行时已接入 GM 系统的对话、执行和持久化基础层：
+这是一个使用正式版原生 ModLoader 的独立 Mod 工程。Mod 名称为“自由聊天&议价&交换”，程序集为 `FreeChatBargainBarter.dll`，清单为 `manifest.xml`。运行时已接入 GM 系统的对话、执行和持久化基础层：
 
 - Mod 加载和版本检查
 - 独立配置与世界状态保存
@@ -29,9 +29,11 @@ v2 架构设计：GM 系统（旧版设计文档仍保留历史名称）
 阶段一保持玩家可见流程不变。模型等待期间若世界状态发生变化，回复文字仍可显示，
 但其中的议价、寻物、回访、交换、关系和记忆副作用会被移除。
 
-生成的 DLL 应复制到：
+工坊用户订阅后由 Steam 自动下载，在游戏 Mod 页面启用即可。以下目录仅供开发者本地部署核对：
 
-`E:\SteamLibrary\steamapps\common\Probably Stolen Demo\Mods`
+`E:\SteamLibrary\steamapps\common\Probably Stolen\Mods\FreeChatBargainBarter\manifest.xml`
+
+`E:\SteamLibrary\steamapps\common\Probably Stolen\Mods\FreeChatBargainBarter\FreeChatBargainBarter.dll`
 
 运行日志位于：
 
@@ -86,14 +88,13 @@ GM 系统数据位于同一扩展目录（旧文件名继续兼容）：
 
 ## 编译
 
-项目依赖目标游戏目录中的 MelonLoader 和 IL2CPP 程序集。打开 `AIWorldPawnshop.csproj`，确认 `GameDir` 指向实际安装位置后构建。
+项目引用正式版目录中的 Mono 托管程序集。打开 `AIWorldPawnshop.csproj`，确认 `GameDir` 指向实际安装位置后构建。
 
-阶段一基础 smoke：
+基础离线检查：
 
 ```powershell
 dotnet run --project .\tools\EchoWeaveSmoke\EchoWeaveSmoke.csproj
-dotnet run --project .\tools\BargainScopeHarness\BargainScopeHarness.csproj
-dotnet run --project .\tools\PatchContractHarness\PatchContractHarness.csproj -- .\bin\Debug\net6.0\AIWorldPawnshop.dll "E:\SteamLibrary\steamapps\common\Probably Stolen Demo"
+dotnet run --project .\tools\FormalPatchHarness\FormalPatchHarness.csproj -c Release -- .\bin\Release\netstandard2.1\FreeChatBargainBarter.dll "E:\SteamLibrary\steamapps\common\Probably Stolen"
 ```
 
 ## 部署
@@ -102,8 +103,10 @@ dotnet run --project .\tools\PatchContractHarness\PatchContractHarness.csproj --
 .\scripts\deploy.ps1
 ```
 
-部署脚本只复制 Mod DLL 和默认配置，不修改原版程序集。配置和本地内容会复制到
+部署脚本复制清单、Mod DLL 及其依赖、头图和默认配置，不修改原版程序集。配置和本地内容会复制到
 Unity 的 `Application.persistentDataPath` 对应目录。
+
+工坊发布目录由 `.\scripts\package-workshop.ps1` 生成到桌面；该目录是上传源文件，订阅用户无需手动复制。
 
 ## 未完成与待验证记录
 

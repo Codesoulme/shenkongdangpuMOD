@@ -242,8 +242,7 @@ public sealed class OpenAiCompatibleProvider : IModelProvider
                 .SendAsync(message, HttpCompletionOption.ResponseHeadersRead, timeout.Token)
                 .ConfigureAwait(false);
             var headersMs = watch.ElapsedMilliseconds;
-            var responseBody = await response.Content
-                .ReadAsStringAsync(timeout.Token)
+            var responseBody = await RuntimeCompat.ReadBodyAsync(response.Content, timeout.Token)
                 .ConfigureAwait(false);
             var totalMs = watch.ElapsedMilliseconds;
 
@@ -277,7 +276,7 @@ public sealed class OpenAiCompatibleProvider : IModelProvider
                 $"response_chars={responseBody.Length} parsed={parsed is not null}");
             return parsed is null
                 ? RequestAttempt.Failure(
-                    $"{ProtocolLabel(protocol)} 已响应，但内容不是有效的当铺世界 JSON",
+                    $"{ProtocolLabel(protocol)} 已响应，但内容不是有效的对话 JSON",
                     (int)response.StatusCode)
                 : RequestAttempt.Success(parsed);
         }
@@ -342,8 +341,7 @@ public sealed class OpenAiCompatibleProvider : IModelProvider
             using var response = await httpClient
                 .SendAsync(message, HttpCompletionOption.ResponseHeadersRead, timeout.Token)
                 .ConfigureAwait(false);
-            var responseBody = await response.Content
-                .ReadAsStringAsync(timeout.Token)
+            var responseBody = await RuntimeCompat.ReadBodyAsync(response.Content, timeout.Token)
                 .ConfigureAwait(false);
 
             if (!response.IsSuccessStatusCode)
@@ -947,7 +945,7 @@ public sealed class OpenAiCompatibleProvider : IModelProvider
             // Keep the plain response body when a gateway returns non-JSON text.
         }
 
-        return ShortenError(detail.ReplaceLineEndings(" "));
+        return ShortenError(RuntimeCompat.SingleLine(detail));
     }
 
     private static string ProtocolLabel(string protocol) =>

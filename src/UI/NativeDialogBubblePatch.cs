@@ -1,6 +1,6 @@
 using HarmonyLib;
-using Il2Cpp;
-using Il2CppTMPro;
+using AIWorldPawnshop.Compatibility;
+using TMPro;
 using MelonLoader;
 using UnityEngine;
 using UnityEngine.Events;
@@ -111,7 +111,7 @@ internal static class NativeDialogEntry
     }
 
     public static void Attach(
-        Il2CppSystem.Collections.Generic.List<DialogChoiceBubble>? bubbles,
+        System.Collections.Generic.List<DialogChoiceBubble>? bubbles,
         NativeDialogScene scene,
         bool activeOnly = false)
     {
@@ -401,9 +401,7 @@ internal static class NativeDialogEntry
 
             gameObject.name = PhoneEntryObjectName;
             gameObject.SetActive(true);
-            var button = IsAlive(bubble.button)
-                ? bubble.button
-                : gameObject.GetComponent<Button>();
+            var button = FormalGameAccess.GetDialogButton(bubble);
             var label = IsAlive(bubble.TMP)
                 ? bubble.TMP
                 : gameObject.GetComponentInChildren<TextMeshProUGUI>(true);
@@ -430,7 +428,7 @@ internal static class NativeDialogEntry
     private static bool PositionPhoneEntry(
         GameObject entry,
         DialogChoiceBubble template,
-        Il2CppSystem.Collections.Generic.List<DialogChoiceBubble>? bubbles)
+        System.Collections.Generic.List<DialogChoiceBubble>? bubbles)
     {
         if (!IsAlive(entry) || !IsAlive(template))
             return false;
@@ -464,7 +462,7 @@ internal static class NativeDialogEntry
     }
 
     private static DialogChoiceBubble? FindLastActiveChoice(
-        Il2CppSystem.Collections.Generic.List<DialogChoiceBubble>? bubbles)
+        System.Collections.Generic.List<DialogChoiceBubble>? bubbles)
     {
         if (bubbles is null)
             return null;
@@ -561,7 +559,7 @@ internal static class NativeDialogEntry
         }
 
         bool dialogueActive;
-        Il2CppSystem.Collections.Generic.List<DialogChoiceBubble>? storeBubbles;
+        System.Collections.Generic.List<DialogChoiceBubble>? storeBubbles;
         try
         {
             storeBubbles = manager.dialogChoiceBubbles;
@@ -672,7 +670,7 @@ internal static class NativeDialogEntry
     }
 
     private static DialogChoiceBubble? FindTemplate(
-        Il2CppSystem.Collections.Generic.List<DialogChoiceBubble>? bubbles)
+        System.Collections.Generic.List<DialogChoiceBubble>? bubbles)
     {
         if (bubbles is null)
             return null;
@@ -721,7 +719,7 @@ internal static class NativeDialogEntry
     }
 
     private static bool HasActiveNativeChoice(
-        Il2CppSystem.Collections.Generic.List<DialogChoiceBubble>? bubbles)
+        System.Collections.Generic.List<DialogChoiceBubble>? bubbles)
     {
         if (bubbles is null)
             return false;
@@ -1010,9 +1008,7 @@ internal static class NativeDialogEntry
                 rect.localScale = Vector3.one;
             }
 
-            var button = IsAlive(bubble.button)
-                ? bubble.button
-                : gameObject.GetComponent<Button>();
+            var button = FormalGameAccess.GetDialogButton(bubble);
             var label = IsAlive(bubble.TMP)
                 ? bubble.TMP
                 : gameObject.GetComponentInChildren<TextMeshProUGUI>(true);
@@ -1129,9 +1125,7 @@ internal static class NativeDialogEntry
             gameObject.name = EntryObjectName;
             gameObject.SetActive(true);
 
-            var button = IsAlive(bubble.button)
-                ? bubble.button
-                : gameObject.GetComponent<Button>();
+            var button = FormalGameAccess.GetDialogButton(bubble);
             var label = IsAlive(bubble.TMP)
                 ? bubble.TMP
                 : gameObject.GetComponentInChildren<TextMeshProUGUI>(true);

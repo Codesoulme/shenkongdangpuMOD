@@ -1,5 +1,5 @@
-using Il2Cpp;
 using UnityEngine;
+using AIWorldPawnshop.Compatibility;
 using AIWorldPawnshop.Models;
 using AIWorldPawnshop.Runtime;
 using AIWorldPawnshop.GM;
@@ -48,7 +48,7 @@ public sealed class WorldUiController
 
     private void Open(WorldRuntime runtime)
     {
-        var builder = CustomUIManager.Window(WindowId, "当铺世界");
+        var builder = CustomUIManager.Window(WindowId, ModConstants.DisplayName);
         builder
             .SetSize(760f, 560f)
             .Center()
@@ -94,7 +94,7 @@ public sealed class WorldUiController
         var currentClient = string.Empty;
         try
         {
-            var client = PlayerStore.Instance?.currentClientInstance?.storeClient;
+            var client = FormalGameAccess.GetClient(PlayerStore.Instance?.currentClientInstance);
             if (client is not null)
             {
                 var name = string.IsNullOrWhiteSpace(client.realName) ? client.displayName : client.realName;
@@ -227,14 +227,14 @@ public sealed class WorldUiController
     private static string BuildNews(WorldState state)
     {
         if (state.News.Count == 0)
-            return "\n当铺世界新闻\n暂无 Mod 新闻。";
+            return "\n世界新闻\n暂无 Mod 新闻。";
 
         var lines = state.News
             .OrderByDescending(x => x.Importance)
             .ThenByDescending(x => x.Day)
             .Take(10)
             .Select(x => $"第 {x.Day} 天  {x.Title}\n{x.Body}");
-        return "\n当铺世界新闻\n" + string.Join("\n\n", lines);
+        return "\n世界新闻\n" + string.Join("\n\n", lines);
     }
 
     private static string FormatRelationship(int relationship)

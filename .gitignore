@@ -1,5 +1,6 @@
 bin/
 obj/
+dist/
 .tmp-*/
 tools/cpp2il-recovery-*/
 tools/cpp2il-text-*/

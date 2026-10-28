@@ -1,5 +1,5 @@
 using AIWorldPawnshop.Models;
-using Il2Cpp;
+using AIWorldPawnshop.Compatibility;
 using MelonLoader;
 
 namespace AIWorldPawnshop.Runtime;
@@ -35,7 +35,7 @@ internal static class NativeReturnVisitAdapter
         {
             var playerStore = PlayerStore.Instance;
             var instance = playerStore?.currentClientInstance;
-            var client = instance?.GetClientBlueprint() ?? instance?.storeClient;
+            var client = FormalGameAccess.GetClient(instance);
             if (playerStore is null || client is null)
                 return Result(true, false, "原版来客已经离开");
 

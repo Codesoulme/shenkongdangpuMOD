@@ -1,5 +1,5 @@
 using AIWorldPawnshop.Models;
-using Il2Cpp;
+using AIWorldPawnshop.Compatibility;
 using MelonLoader;
 
 namespace AIWorldPawnshop.Runtime;
@@ -28,7 +28,7 @@ internal static class NativeWorldEconomyAdapter
         try
         {
             var instance = PlayerStore.Instance?.currentClientInstance;
-            var client = instance?.GetClientBlueprint() ?? instance?.storeClient;
+            var client = FormalGameAccess.GetClient(instance);
             if (client is null)
                 return new(false, false, "当前没有原版来客");
 
@@ -178,8 +178,7 @@ internal static class NativeWorldEconomyAdapter
             }
 
             var seen = new HashSet<int>();
-            var carried = instance?.gridInv?.items;
-            if (carried is not null)
+            var carried = FormalGameAccess.GetItems(FormalGameAccess.GetInventory(instance));
             {
                 for (var i = 0; i < carried.Count; i++)
                 {

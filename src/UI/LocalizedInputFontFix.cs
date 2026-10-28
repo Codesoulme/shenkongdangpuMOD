@@ -1,5 +1,4 @@
-using Il2Cpp;
-using Il2CppTMPro;
+using TMPro;
 using MelonLoader;
 
 namespace AIWorldPawnshop.UI;

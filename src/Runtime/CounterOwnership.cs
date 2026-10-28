@@ -1,4 +1,5 @@
-using Il2Cpp;
+
+using AIWorldPawnshop.Compatibility;
 
 namespace AIWorldPawnshop.Runtime;
 
@@ -277,9 +278,7 @@ internal sealed class CounterOwnershipSnapshot
     {
         try
         {
-            var items = clientInstance?.gridInv?.items;
-            if (items is null)
-                return;
+            var items = FormalGameAccess.GetItems(FormalGameAccess.GetInventory(clientInstance));
 
             for (var i = 0; i < items.Count; i++)
             {
@@ -301,9 +300,7 @@ internal sealed class CounterOwnershipSnapshot
         var result = new List<GameItem>();
         try
         {
-            var items = inventory?.items;
-            if (items is null)
-                return result;
+            var items = FormalGameAccess.GetItems(inventory);
 
             for (var i = 0; i < items.Count; i++)
             {

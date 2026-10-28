@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ModManifest>
+  <ID>FreeChatBargainBarter</ID>
+  <Name>自由聊天&amp;议价&amp;交换</Name>
+  <Author>Codesoulme</Author>
+  <ModVersion>0.4.0</ModVersion>
+  <Description>让店内顾客和电话联系人支持自由聊天，并把经过验证的议价、物品交换、补付和回访约定接入正式版原版流程。</Description>
+  <GameVersions>
+    <Version>100-Rev1</Version>
+  </GameVersions>
+  <Assemblies>
+    <Assembly>FreeChatBargainBarter.dll</Assembly>
+  </Assemblies>
+  <Capabilities>
+    <Capability>files</Capability>
+    <Capability>network</Capability>
+    <Capability>dynamic-code</Capability>
+    <Capability>reflection-external</Capability>
+  </Capabilities>
+</ModManifest>

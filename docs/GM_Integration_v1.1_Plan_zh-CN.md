@@ -2,7 +2,7 @@
 
 ## 范围与原则
 
-本方案依据 `C:\Users\14262\AIworld\docs\AI游戏世界模拟接入指导书_v1.1.docx`，只落实适用于 Probably Stolen Demo 0.46D 的机制。原版人物、物品、预算、交易和来客队列是事实来源；Mod 仅保存补充状态，并通过已经验证的原版适配器产生副作用。模型给出的文字或数值不能充当执行回执。指导书中的其他题材案例、研究阈值和未接通的原版接口不自动成为本 Mod 能力。
+本方案依据 `C:\Users\14262\AIworld\docs\AI游戏世界模拟接入指导书_v1.1.docx`，只落实适用于 Probably Stolen 正式版 ModLoader 100-Rev1 的机制。原版人物、物品、预算、交易和来客队列是事实来源；Mod 仅保存补充状态，并通过已经验证的原版适配器产生副作用。模型给出的文字或数值不能充当执行回执。指导书中的其他题材案例、研究阈值和未接通的原版接口不自动成为本 Mod 能力。
 
 ## 调整矩阵
 
@@ -33,6 +33,6 @@
 dotnet build AIWorldPawnshop.csproj -c Release
 dotnet run --project tools/EchoWeaveSmoke/EchoWeaveSmoke.csproj -c Release
 dotnet run --project tools/BargainScopeHarness/BargainScopeHarness.csproj -c Release
-dotnet run --project tools/PatchContractHarness/PatchContractHarness.csproj -c Release -- "C:\Users\14262\AIWorldPawnshopMod\bin\Release\net6.0\AIWorldPawnshop.dll" "E:\SteamLibrary\steamapps\common\Probably Stolen Demo"
+dotnet run --project tools/FormalPatchHarness/FormalPatchHarness.csproj -c Release -- "C:\Users\14262\AIWorldPawnshopMod\bin\Release\netstandard2.1\FreeChatBargainBarter.dll" "E:\SteamLibrary\steamapps\common\Probably Stolen"
 git diff --check
 ```

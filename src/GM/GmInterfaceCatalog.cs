@@ -103,7 +103,7 @@ public static class GmInterfaceCatalog
 
     public static IReadOnlyList<GmInterfaceDescriptor> Search(string? query)
     {
-        var terms = (query ?? string.Empty).Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var terms = RuntimeCompat.SplitTerms(query);
         return All.Where(x => terms.Length == 0 || terms.All(term =>
             x.Key.Contains(term, StringComparison.OrdinalIgnoreCase) ||
             x.Owner.Contains(term, StringComparison.OrdinalIgnoreCase) ||

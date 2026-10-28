@@ -101,7 +101,7 @@ public sealed class CapabilityRegistry
 
     public void Register(IWorldCapability capability)
     {
-        ArgumentNullException.ThrowIfNull(capability);
+        RuntimeCompat.Require(capability, nameof(capability));
         var key = capability.Descriptor.CapabilityKey.Trim();
         if (key.Length == 0)
             throw new ArgumentException("Capability key cannot be empty.", nameof(capability));
@@ -120,8 +120,7 @@ public sealed class CapabilityRegistry
         string? scene = null,
         EchoWeaveRiskLevel? maximumRisk = null)
     {
-        var terms = (query ?? string.Empty)
-            .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var terms = RuntimeCompat.SplitTerms(query);
 
         return _capabilities.Values
             .Where(capability => maximumRisk is null ||

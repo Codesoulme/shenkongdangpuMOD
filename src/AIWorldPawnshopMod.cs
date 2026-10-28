@@ -1,13 +1,16 @@
 using System.Reflection;
-using MelonLoader;
-using UnityEngine;
 using AIWorldPawnshop.Runtime;
 using AIWorldPawnshop.UI;
-using Il2Cpp;
+using UnityEngine;
 
 namespace AIWorldPawnshop;
 
-public sealed class AIWorldPawnshopMod : MelonMod
+/// <summary>
+/// Native Probably Stolen ModLoader entry point. The game owns this
+/// lifecycle; a small Unity driver supplies the per-frame callback that the
+/// old Demo MelonLoader entry used to provide.
+/// </summary>
+public sealed class AIWorldPawnshopMod : IMod
 {
     internal static AIWorldPawnshopMod? Instance { get; private set; }
     internal WorldRuntime Runtime => _runtime ?? throw new InvalidOperationException("Mod runtime is not ready.");
@@ -17,30 +20,64 @@ public sealed class AIWorldPawnshopMod : MelonMod
     private WorldUiController? _ui;
     private ChatUiController? _chatUi;
     private ModelSettingsUiController? _modelSettingsUi;
-    private MelonPreferences_Entry<bool>? _enabledPreference;
+    private ModDriver? _driver;
+    private bool _enabled = true;
 
-    public override void OnInitializeMelon()
+    public void Init(ModManifest manifest)
     {
+        Instance = this;
+        ModLog.Info($"[{ModConstants.DisplayName}] 初始化正式版 ModLoader，清单 {manifest.ModVersion}");
+    }
+
+    public void OnEnable()
+    {
+        if (_runtime is not null)
+            return;
+
+        _enabled = true;
         Instance = this;
         var dataRoot = Path.Combine(Application.persistentDataPath, ModConstants.DataDirectoryName);
         _runtime = new WorldRuntime(dataRoot, Path.GetDirectoryName(Application.dataPath));
         _ui = new WorldUiController();
         _chatUi = new ChatUiController();
         _modelSettingsUi = new ModelSettingsUiController();
-        _enabledPreference = MelonPreferences.CreateCategory(ModConstants.ModId)
-            .CreateEntry("Enabled", true, "启用当铺世界");
+        _driver = ModDriver.Attach(this);
 
-        MelonLogger.Msg($"[{ModConstants.DisplayName}] 已加载，目标版本 {ModConstants.TargetGameVersion}");
-        MelonLogger.Msg($"[{ModConstants.DisplayName}] 程序集：{Assembly.GetExecutingAssembly().GetName().Version}");
-        MelonLogger.Msg($"[{ModConstants.DisplayName}] 数据目录：{dataRoot}");
-        MelonLogger.Msg(
+        ModLog.Info($"[{ModConstants.DisplayName}] 已加载，目标版本 {ModConstants.TargetGameVersion}");
+        ModLog.Info($"[{ModConstants.DisplayName}] 程序集：{Assembly.GetExecutingAssembly().GetName().Version}");
+        ModLog.Info($"[{ModConstants.DisplayName}] 数据目录：{dataRoot}");
+        ModLog.Info(
             $"[{ModConstants.DisplayName}] 模型接口：{_runtime.Config.Provider} / {_runtime.Config.BaseUrl} / " +
             $"{_runtime.Config.Model}，联网请求：{_runtime.Config.AllowNetwork}");
     }
 
-    public override void OnUpdate()
+    public void OnDisable()
     {
-        if (_runtime is null || _enabledPreference is null || !_enabledPreference.Value)
+        _enabled = false;
+        try
+        {
+            _runtime?.Save();
+        }
+        catch (Exception ex)
+        {
+            ModLog.Error($"[{ModConstants.DisplayName}] 退出保存失败：{ex}");
+        }
+
+        if (_driver is not null)
+            UnityEngine.Object.Destroy(_driver.gameObject);
+        _driver = null;
+        _modelSettingsUi?.Close();
+        _chatUi?.Close();
+        _modelSettingsUi = null;
+        _chatUi = null;
+        _ui = null;
+        _runtime = null;
+        Instance = null;
+    }
+
+    internal void Tick()
+    {
+        if (!_enabled || _runtime is null)
             return;
 
         NativeDialogEntry.Update();
@@ -49,19 +86,6 @@ public sealed class AIWorldPawnshopMod : MelonMod
         _modelSettingsUi?.Update(_runtime);
         _ui?.Update(_runtime);
         _chatUi?.Update(_runtime);
-    }
-
-    public override void OnApplicationQuit()
-    {
-        try
-        {
-            _runtime?.Save();
-        }
-        catch (Exception ex)
-        {
-            MelonLogger.Error($"[{ModConstants.DisplayName}] 退出保存失败：{ex}");
-        }
-        Instance = null;
     }
 
     internal void OnNativeDayEnded() => _runtime?.OnNativeDayEnded();
@@ -95,5 +119,33 @@ public sealed class AIWorldPawnshopMod : MelonMod
             return;
 
         _chatUi.OpenFromBubble(_runtime, scene);
+    }
+}
+
+internal sealed class ModDriver : MonoBehaviour
+{
+    private AIWorldPawnshopMod? _mod;
+
+    internal static ModDriver Attach(AIWorldPawnshopMod mod)
+    {
+        var host = new GameObject("FreeChatBargainBarter.Driver");
+        UnityEngine.Object.DontDestroyOnLoad(host);
+        var driver = host.AddComponent<ModDriver>();
+        driver._mod = mod;
+        return driver;
+    }
+
+    private void Update() => _mod?.Tick();
+
+    private void OnApplicationQuit()
+    {
+        try
+        {
+            _mod?.OnDisable();
+        }
+        catch (Exception ex)
+        {
+            ModLog.Error($"[{ModConstants.DisplayName}] 应用退出处理失败：{ex}");
+        }
     }
 }

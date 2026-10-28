@@ -26,7 +26,7 @@ public sealed class EchoWeaveRuntime
         if (string.IsNullOrWhiteSpace(worldId))
             throw new ArgumentException("World id cannot be empty.", nameof(worldId));
 
-        Directory.CreateDirectory(dataRoot);
+        System.IO.Directory.CreateDirectory(dataRoot);
         _snapshotPath = Path.Combine(dataRoot, "EchoWeaveSnapshot.json");
         _ledger = new IntentLedger(dataRoot, worldId);
         WorldId = worldId;
@@ -44,8 +44,8 @@ public sealed class EchoWeaveRuntime
 
     public EchoWeaveSnapshot Capture(ConversationRequest request, WorldState state)
     {
-        ArgumentNullException.ThrowIfNull(request);
-        ArgumentNullException.ThrowIfNull(state);
+        RuntimeCompat.Require(request, nameof(request));
+        RuntimeCompat.Require(state, nameof(state));
 
         var gameContext = request.GameContext ?? new GameConversationContext();
         var character = gameContext.Character ?? new NativeCharacterContext();
@@ -323,7 +323,7 @@ public sealed class EchoWeaveRuntime
 
     public EchoWeaveRecoveryReport Recover(WorldState state)
     {
-        ArgumentNullException.ThrowIfNull(state);
+        RuntimeCompat.Require(state, nameof(state));
         var report = _ledger.Recover();
         if (report.OpenIntents.Count == 0)
             return report;
@@ -387,7 +387,7 @@ public sealed class EchoWeaveRuntime
             File.WriteAllText(temp, JsonSerializer.Serialize(snapshot, JsonOptions()), Encoding.UTF8);
             if (File.Exists(_snapshotPath))
                 File.Copy(_snapshotPath, _snapshotPath + ".bak", true);
-            File.Move(temp, _snapshotPath, true);
+            RuntimeCompat.MoveReplace(temp, _snapshotPath);
         }
         catch
         {
@@ -443,8 +443,8 @@ public static class EchoWeaveKeys
             }
         }
 
-        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(builder.ToString()));
-        return Convert.ToHexString(bytes).ToLowerInvariant();
+        var bytes = RuntimeCompat.HashSha256(Encoding.UTF8.GetBytes(builder.ToString()));
+        return RuntimeCompat.ToHex(bytes).ToLowerInvariant();
     }
 
     private static void Append(StringBuilder builder, string value)

@@ -1,5 +1,5 @@
 using AIWorldPawnshop.Models;
-using Il2Cpp;
+using AIWorldPawnshop.Compatibility;
 using MelonLoader;
 
 namespace AIWorldPawnshop.Runtime;
@@ -79,8 +79,8 @@ internal static class NativeBarterAdapter
         {
             var playerStore = PlayerStore.Instance;
             var instance = playerStore?.currentClientInstance;
-            var client = instance?.GetClientBlueprint() ?? instance?.storeClient;
-            var inventory = instance?.gridInv?.items;
+            var client = FormalGameAccess.GetClient(instance);
+            var inventory = FormalGameAccess.GetItems(FormalGameAccess.GetInventory(instance)).ToList();
             if (playerStore is null || client is null)
                 return Result(true, false, "原版来客已经离开");
 
@@ -122,7 +122,7 @@ internal static class NativeBarterAdapter
                 return Result(true, false, "上一笔交换还在确认中，请先完成或取消它");
 
             var offeredName = DisplayName(offeredItem);
-            var conditions = new Il2CppSystem.Collections.Generic.List<BarterCondition>();
+            var conditions = new System.Collections.Generic.List<BarterCondition>();
             for (var index = 0; index < requiredItems.Count; index++)
             {
                 var requiredItem = requiredItems[index];
@@ -156,7 +156,7 @@ internal static class NativeBarterAdapter
                 acceptedResponse = acceptedText,
                 deniedResponse = $"这不是说好的{requiredName}。",
                 currentSetIndex = 0,
-                offerSets = new Il2CppSystem.Collections.Generic.List<Il2CppSystem.Action>()
+                offerSets = new System.Collections.Generic.List<System.Action>()
             };
             // The offer is instantiated and accepted asynchronously.  Capture
             // only immutable scalar identity here; IL2CPP GameItem wrappers
@@ -296,8 +296,7 @@ internal static class NativeBarterAdapter
             return false;
         try
         {
-            client ??= PlayerStore.Instance?.currentClientInstance?.GetClientBlueprint() ??
-                       PlayerStore.Instance?.currentClientInstance?.storeClient;
+            client ??= FormalGameAccess.GetClient(PlayerStore.Instance?.currentClientInstance);
             var liveKey = FirstNotBlank(client?.identifier, client?.displayName);
             if (client is not null && liveKey.Equals(_activeClientKey, StringComparison.OrdinalIgnoreCase))
             {
@@ -473,8 +472,7 @@ internal static class NativeBarterAdapter
         try
         {
             var playerStore = PlayerStore.Instance;
-            var client = playerStore?.currentClientInstance?.GetClientBlueprint() ??
-                         playerStore?.currentClientInstance?.storeClient;
+            var client = FormalGameAccess.GetClient(playerStore?.currentClientInstance);
             var liveKey = FirstNotBlank(client?.identifier, client?.displayName);
             if (client is null || !liveKey.Equals(execution.ClientKey, StringComparison.OrdinalIgnoreCase))
                 return CancelExecution(execution, "确认时来客已改变");
@@ -552,7 +550,7 @@ internal static class NativeBarterAdapter
                 return true;
             }
 
-            var soldItems = new Il2CppSystem.Collections.Generic.List<GameItem>();
+            var soldItems = new System.Collections.Generic.List<GameItem>();
             foreach (var item in playerItems)
             {
                 if (!TryReadOwnership(item, out var owned) || !owned)
@@ -743,8 +741,7 @@ internal static class NativeBarterAdapter
 
         try
         {
-            var client = PlayerStore.Instance?.currentClientInstance?.GetClientBlueprint() ??
-                         PlayerStore.Instance?.currentClientInstance?.storeClient;
+            var client = FormalGameAccess.GetClient(PlayerStore.Instance?.currentClientInstance);
             var liveKey = FirstNotBlank(client?.identifier, client?.displayName);
             if (client is null || !liveKey.Equals(execution.ClientKey, StringComparison.OrdinalIgnoreCase))
             {
@@ -811,7 +808,7 @@ internal static class NativeBarterAdapter
         }
 
         var clientInventory = ReadGridItems(
-            PlayerStore.Instance?.currentClientInstance?.gridInv);
+            FormalGameAccess.GetInventory(PlayerStore.Instance?.currentClientInstance));
         var all = front.Concat(clientInventory).ToList();
         var exact = all.FirstOrDefault(item => SafeRuntimeKey(item) == runtimeKey);
         if (exact is not null)
@@ -1112,10 +1109,10 @@ internal static class NativeBarterAdapter
         return result;
     }
 
-    private static Il2CppSystem.Collections.Generic.List<string> ToNativeStringList(
+    private static System.Collections.Generic.List<string> ToNativeStringList(
         IEnumerable<string> values)
     {
-        var result = new Il2CppSystem.Collections.Generic.List<string>();
+        var result = new System.Collections.Generic.List<string>();
         foreach (var value in values)
         {
             if (!string.IsNullOrWhiteSpace(value))
@@ -1152,9 +1149,7 @@ internal static class NativeBarterAdapter
         var result = new List<GameItem>();
         try
         {
-            var items = inventory?.items;
-            if (items is null)
-                return result;
+            var items = FormalGameAccess.GetItems(inventory);
             for (var index = 0; index < items.Count; index++)
             {
                 var item = items[index];
@@ -1265,7 +1260,7 @@ internal static class NativeBarterAdapter
     }
 
     private static GameItem? FindClientItem(
-        Il2CppSystem.Collections.Generic.List<GameItem>? inventory,
+        System.Collections.Generic.List<GameItem>? inventory,
         CounterOwnershipSnapshot ownership,
         BarterProposal proposal,
         NativeItemContext? currentContext)
