@@ -1,5 +1,73 @@
 # 《自由聊天&议价&交换》Mod
 
+### 《自由聊天&议价&交换》
+
+随心所欲，畅所欲言！
+
+哄骗一些顾客，威胁一些改造体，辱骂一位房东
+
+你是合格的商人吗？
+
+发挥你的三寸不烂之舌，让顾客同意你的报价
+
+没有信用点？那就交换！
+
+拿假标签纯水交换他们的AI模组吧！
+
+### 主要功能
+
+- 店内顾客与电话联系人自由聊天
+- 自由议价：折扣、加价和目标价格
+- 精确物品交换，区分顾客物品与玩家物品
+- 支持“物品 + 信用点”的混合交换
+- 顾客明确补款时，从顾客预算结算给玩家
+- 查看和展示顾客真实携带的物品
+- 找货委托与未来回访
+- 第三方传话任务，目标人物会自行接受或拒绝
+- 顾客明确告别时自动离店，电话联系人明确结束时自动挂断
+- 支持临时变化、跨天事件、到期恢复和公开新闻投影
+
+### 配置要求
+
+需要在游戏内按 `F10` 配置 OpenAI 兼容模型接口。接口不可用时会自动使用本地预置回复。
+
+自由聊天会将必要的对话和交易上下文发送到你配置的服务。请根据服务商的隐私政策和计费规则使用。
+
+---
+
+### Free Chat & Bargaining & Barter
+
+Talk freely and say whatever you want!
+
+Persuade some customers, threaten some augmented people, insult a landlord.
+
+Are you a qualified merchant?
+
+Use your silver tongue to get customers to accept your offer.
+
+No credits? Then barter!
+
+Trade purified water with a fake label for their AI modules!
+
+### Main Features
+
+- Free conversation with shop customers and phone contacts
+- Bargaining with discounts, markups, and target prices
+- Precise item barter with verified customer and player ownership
+- Mixed trades using items plus credits
+- Customer-to-player credit transfers from the customer's budget
+- Reveal and display real items carried by customers
+- Future item sourcing requests and return visits
+- Third-party contact tasks with independent target decisions
+- Automatic customer departure and phone call ending
+- Temporary changes, cross-day events, expiry restoration, and public news projection
+
+### Requirements
+
+Press `F10` in-game to configure an OpenAI-compatible model endpoint. Local fallback replies are used when the configured service is unavailable.
+
+Conversation and necessary trade context are sent to the service you configure. Check that provider's privacy policy and billing terms before use.
+
 目标版本：Probably Stolen 正式版 0.46D（AppID 4348910，ModLoader 100-Rev1）
 
 v2 架构设计：GM 系统（旧版设计文档仍保留历史名称）
