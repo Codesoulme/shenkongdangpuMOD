@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ModManifest>
+  <ID>DeepSpacePawnshopLedger</ID>
+  <Name>账本：好好记账</Name>
+  <Author>一万万</Author>
+  <ModVersion>1.0.1</ModVersion>
+  <Description><![CDATA[
+把每天的信用点收支记清楚。
+
+《账本：好好记账》将账本整合进游戏原生日历，打开日历即可查看当天记录，也可切换回看昨天。
+
+### 账本功能
+
+- 汇总每日收入、支出与净额
+- 逐笔列出收支方向、顾客、交易类型、物品明细和金额
+- 显示交易中实际生效的折扣或加价
+- 自动折叠同名物品，并标注数量
+- 支持分页查看；账本随当前游戏存档保存与读取
+
+账本记录顾客交易及游戏内各类信用点结算，帮助你核对每天的资金变化。
+
+---
+
+### Keep Your Books Straight
+
+Keep every credit movement easy to review. This mod adds a ledger page to the in-game calendar. It opens on today's transactions, and you can switch to yesterday whenever you need to look back.
+
+### Ledger Features
+
+- See daily totals for income, expenses, and net balance
+- Review each entry by direction, customer when available, transaction type, item details, and amount
+- See discounts or markups that were actually applied to completed trades
+- Fold entries for items with the same name and see the total quantity
+- Browse paginated records; ledger data is saved and restored with the active game save
+
+Customer trades and in-game credit settlements are recorded from their actual balance changes, helping you keep track of where your money went.
+]]></Description>
+  <GameVersions>
+    <Version>0.46D</Version>
+  </GameVersions>
+  <Assemblies>
+    <Assembly>DeepSpacePawnshopLedger.dll</Assembly>
+  </Assemblies>
+  <Capabilities>
+    <Capability>files</Capability>
+    <Capability>network</Capability>
+    <Capability>dynamic-code</Capability>
+    <Capability>reflection-external</Capability>
+  </Capabilities>
+</ModManifest>

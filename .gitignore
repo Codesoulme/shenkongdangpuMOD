@@ -1,6 +1,14 @@
 bin/
 obj/
 dist/
+.deploy-backups/
+.deploy-staging/
+.workshop-submission/
+**/bin/
+**/obj/
+**/.deploy-backups/
+**/.deploy-staging/
+**/.workshop-submission/
 .tmp-*/
 tools/cpp2il-recovery-*/
 tools/cpp2il-text-*/
@@ -9,5 +17,4 @@ tools/ilspycmd8/
 
 # Local game/runtime artifacts
 *.log
-MelonLoader/
-Mods/
+/MelonLoader/

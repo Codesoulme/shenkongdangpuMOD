@@ -1,0 +1,197 @@
+# 《自由聊天&议价&交换》Mod
+
+### 《自由聊天&议价&交换》
+
+随心所欲，畅所欲言！
+
+哄骗一些顾客，威胁一些改造体，辱骂一位房东
+
+你是合格的商人吗？
+
+发挥你的三寸不烂之舌，让顾客同意你的报价
+
+没有信用点？那就交换！
+
+拿假标签纯水交换他们的AI模组吧！
+
+### 主要功能
+
+- 店内顾客与电话联系人自由聊天
+- 自由议价：折扣、加价和目标价格
+- 精确物品交换，区分顾客物品与玩家物品
+- 支持“物品 + 信用点”的混合交换
+- 顾客明确补款时，从顾客预算结算给玩家
+- 查看和展示顾客真实携带的物品
+- 找货委托与未来回访
+- 第三方传话任务，目标人物会自行接受或拒绝
+- 顾客明确告别时自动离店，电话联系人明确结束时自动挂断
+- 支持临时变化、跨天事件、到期恢复和公开新闻投影
+
+### 配置要求
+
+需要在游戏内按 `F10` 配置 OpenAI 兼容模型接口。接口不可用时会自动使用本地预置回复。
+
+自由聊天会将必要的对话和交易上下文发送到你配置的服务。请根据服务商的隐私政策和计费规则使用。
+
+---
+
+### Free Chat & Bargaining & Barter
+
+Talk freely and say whatever you want!
+
+Persuade some customers, threaten some augmented people, insult a landlord.
+
+Are you a qualified merchant?
+
+Use your silver tongue to get customers to accept your offer.
+
+No credits? Then barter!
+
+Trade purified water with a fake label for their AI modules!
+
+### Main Features
+
+- Free conversation with shop customers and phone contacts
+- Bargaining with discounts, markups, and target prices
+- Precise item barter with verified customer and player ownership
+- Mixed trades using items plus credits
+- Customer-to-player credit transfers from the customer's budget
+- Reveal and display real items carried by customers
+- Future item sourcing requests and return visits
+- Third-party contact tasks with independent target decisions
+- Automatic customer departure and phone call ending
+- Temporary changes, cross-day events, expiry restoration, and public news projection
+
+### Requirements
+
+Press `F10` in-game to configure an OpenAI-compatible model endpoint. Local fallback replies are used when the configured service is unavailable.
+
+Conversation and necessary trade context are sent to the service you configure. Check that provider's privacy policy and billing terms before use.
+
+目标版本：Probably Stolen 正式版 0.46D（AppID 4348910，ModLoader 100-Rev1）
+
+v2 架构设计：GM 系统（旧版设计文档仍保留历史名称）
+
+当前实现的模块与数据流见 [Mod 架构图](docs/Architecture_zh-CN.md)。
+
+这是一个使用正式版原生 ModLoader 的独立 Mod 工程。Mod 名称为“自由聊天&议价&交换”，程序集为 `FreeChatBargainBarter.dll`，清单为 `manifest.xml`。运行时已接入 GM 系统的对话、执行和持久化基础层：
+
+- Mod 加载和版本检查
+- 独立配置与世界状态保存
+- 本地降级内容
+- 模型供应商抽象与 GM 系统知识目录
+- 游戏程序集探针
+- 现有议价、寻物、回访、随身货物、交换和顾客预算补付适配器的统一能力目录
+- 对话快照、状态修订号和稳定去重键
+- `EchoWeaveLedger.jsonl` 追加式意图账簿与损坏尾部容忍
+- 未闭合动作启动恢复；恢复时只标记冲突，不盲目重放原版副作用
+- 第二 AI 可提交受限世界修正；GM 系统只接受供需/价格三类字段，校验幅度、期限、证据和幂等性，并在“人物与世界”页面提示生效结果
+- 每日换日按世界种子确定性生成一至两个候选事件，事件跨天保存并写入 Mod 新闻流；第三方联系任务可跨天保存、到期和接受/拒绝。
+- 第三方联系任务已接入原版未来来客队列：只使用已观察到的原版人物标识，处理队列冲突、目标到店回执和目标 accept/reject 决定，不覆盖剧情来客。
+- Mod 当日新闻已在原版新闻读取路径合并投影，与原版事件去重并按重要性排序；当原版新闻窗口不可用时仍保留 Mod 世界页面完整记录。
+- 世界事件和 GM 修正已投影到当前原版顾客的 `buyPriceModifier` / `sellPriceModifier`，离店、换日和刷新时按原始值恢复，供给修正继续进入找货成功率。
+- “人物与世界”页面已增加能力缺口、原版来客队列、事件经济影响和活动价格修正诊断统计。
+- 自由交谈的执行结果会写入经过可见性过滤的世界事实；后续人物可据此回应真实成交、交换、补付、议价和 GM 世界修正，其他人物的私密对话不会泄露。
+- GM 目标路径现在会再次检查对应执行器是否已接通；仅“发现”的偷窃/警报器接口不会被当作可执行路径。经济修正写入当前来客后会主动刷新原版报价界面。
+
+阶段一保持玩家可见流程不变。模型等待期间若世界状态发生变化，回复文字仍可显示，
+但其中的议价、寻物、回访、交换、关系和记忆副作用会被移除。
+
+工坊用户订阅后由 Steam 自动下载，在游戏 Mod 页面启用即可。以下目录仅供开发者本地部署核对：
+
+`E:\SteamLibrary\steamapps\common\Probably Stolen\Mods\FreeChatBargainBarter\manifest.xml`
+
+`E:\SteamLibrary\steamapps\common\Probably Stolen\Mods\FreeChatBargainBarter\FreeChatBargainBarter.dll`
+
+运行日志位于：
+
+`C:\Users\<用户名>\AppData\LocalLow\Questing Goose Studio\Probably Stolen\AIWorldPawnshop\Logs`
+
+在游戏中按 `F7`、`F9` 或小键盘 `7` 打开“人物与世界”页面，按 `F10` 打开模型接口设置。聊天输入框也提供“查看关系”入口。
+客人对话期间会在原版选项气泡中出现 `......`。点击后输入一句话，客人的回复继续使用原版客人气泡显示。
+
+自由交谈会读取当前客人的原版身份、来访目的、预算、柜台物品和完整随身货物清单。柜台分为顾客侧和玩家侧：顾客带来的、带“未拥有”标签的物品进入 `trade.client_carried_items` 并保持 `owner=client`；玩家侧且原版确认归玩家所有的物品才进入 `trade.player_offered_items`。`GetCountersItems()` 返回两侧合并结果，不能直接用来判断归属。人物和交换执行器都按这个归属核对；无法确认归属时保持 `owner=unknown`，不会自动把物品当成玩家交换物。玩家可以明确请可回访的普通交易客人在未来一至三天内寻找某类物资；人物答应后，结果会在换日时确定，并安排该顾客回访。委托货作为附加卖货内容加入，不会删除顾客原本的买入或卖出任务。承诺的明确加价只作用于该次委托交付。
+
+有固定姓名的顾客会额外构建原版角色档案：原版标识、姓名、阵营、职业线索、当前剧情变量、来访目的和本人专属台词共同决定同一个角色。原版台词会作为说话方式样本，Mod 关系与摘要记忆只补充玩家和此人的共同经历，不能覆盖人物身份或既定故事。全局对话历史不会再混入当前人物，避免把另一名顾客或电话联系人的话当成自己的经历。模型若明确自称为其他已知人物，会自动丢弃该回复并使用本地降级内容。
+
+世界背景与群体资料来自原版简体中文资源；公开设定会进入人物自由交谈，剧情敏感内容仅供 GM 核对，不会当作所有顾客都知道的事。来源和确认边界见 [原版世界与阵营资料](docs/Original_World_And_Factions_zh-CN.md)。
+
+原版资料目录会按资源内容指纹增量更新：未变化时直接读取缓存；变化时在游戏就绪后分帧扫描物品，人物和事件只在实际出现且已知时收录，对话仅取与当前话题相关的少量记录。详见 [原版资料自动索引](docs/Game_Knowledge_Auto_Index_zh-CN.md)。
+
+对话提案、GM 复核、原版执行、读回验证和事实反馈的设计边界见 [对话驱动状态闭环](docs/Conversation_Action_Closed_Loop_zh-CN.md)。
+
+柜台上存在当前交易物品时，自由交谈支持明确的折扣、加价和目标金额。请求会调用原版议价规则，由原版决定接受、拒绝或离场，并刷新原版成交报价；原版议价气泡会接管这一轮回复，避免与模型回复气泡重叠。单次幅度限制为 `1%` 到 `50%`，电话交谈不会改变店内价格。
+
+以物易物会把顾客侧与玩家侧物品的归属、数量、当前价值和议价价值提供给人物 AI 与 GM AI 复核。成交前的本地价值安全门会再次使用原版物品数据核对双方总价值；价值缺失、物品无法唯一确认或明显失衡时会拒绝交换，不会仅因人物回复了“可以”就直接开原版交换界面。混合补款会计入顾客给出的一侧，并在原版交换确认后结算。
+
+找货受原版人物身份、阵营、职业和实际携带货物形成的渠道限制。普通顾客只能尝试常见生活物资；医疗、武器、模块和门禁卡等类别需要对应阵营或专业人物。个人关系和加价可以提高已有渠道的成功率，但不能解锁原本不存在的渠道。具体货物从原版加权掉落表中确定，表内权重越低的物品越稀有，寻找成功率也越低；渠道层级不足时不会用越权物品或其他类别偷偷替代。
+
+模糊表达会先映射到唯一物资类别；模型给出的语义归类还必须达到 `0.7` 置信度。一个请求同时包含多个类别，或只说“带点好东西”而没有可靠类型时，顾客会追问，不会擅自替玩家决定，也不会写入委托或承诺记忆。
+
+模型配置位于：
+
+`C:\Users\<用户名>\AppData\LocalLow\Questing Goose Studio\Probably Stolen\AIWorldPawnshop\Config.json`
+
+默认使用 OpenAI 兼容接口：
+
+- `base_url`: 例如 `http://127.0.0.1:11434/v1`
+- `model`: 本地服务中的模型名
+- `protocol`: `auto`、`responses` 或 `chat_completions`；自动模式会优先为 GPT-5 / o 系列选择 Responses
+- `allow_network`: `true` 才会请求模型
+- `api_key_env`: 可选的环境变量名
+
+设置页支持保存多个 OpenAI 兼容接口档位。用“上一个接口 / 下一个接口”切换，或复制当前接口创建新档位；每个档位可以独立设置地址、模型、密钥、超时和联网开关，点击“保存并使用”后立即生效。
+基础地址通常填到 `/v1`，设置页也兼容直接填写完整的 `/chat/completions` 或 `/responses` 地址。API 密钥可以直接填写，也可以只填写环境变量名。云端模型建议把请求超时设置为 30000 毫秒或更高。
+
+“检测连接”会异步发送一条最小测试请求，不会修改人物关系或世界状态。检测失败、请求超时、服务不可用或返回格式不正确时，聊天会自动回到本地预置回复。
+
+模型请求超时、接口不可用或返回内容不是合法 JSON 时，会自动使用本地客人回复。
+普通闲聊使用精简人物上下文和较小输出预算；涉及交易或世界承诺时才按需加载对应规则，人物明确作出世界承诺后才串行进入 GM 复核。开启 `debug_log` 后，日志中的 `[PERF-GMCHAT]` 会记录各阶段耗时和请求大小，不记录密钥或完整对话。实测诊断和测量命令见 [自由聊天响应时间诊断](docs/Model_Latency_Diagnosis_zh-CN.md)。
+
+GM 系统数据位于同一扩展目录（旧文件名继续兼容）：
+
+- `EchoWeaveSnapshot.json`：最近一次不可变回合快照。
+- `EchoWeaveLedger.jsonl`：请求、执行、结果与恢复记录；每行一条完整记录。
+- `Worlds/<world-id>.json`：包含单调递增的 `stateRevision`。
+
+## 编译
+
+项目引用正式版目录中的 Mono 托管程序集。打开 `AIWorldPawnshop.csproj`，确认 `GameDir` 指向实际安装位置后构建。
+
+基础离线检查：
+
+```powershell
+dotnet run --project .\tools\EchoWeaveSmoke\EchoWeaveSmoke.csproj
+dotnet run --project .\tools\JsonCompatibilityHarness\JsonCompatibilityHarness.csproj -c Release
+dotnet run --project .\tools\FormalPatchHarness\FormalPatchHarness.csproj -c Release -- .\bin\Release\netstandard2.1\FreeChatBargainBarter.dll "E:\SteamLibrary\steamapps\common\Probably Stolen"
+```
+
+## 部署
+
+```powershell
+.\scripts\deploy.ps1
+```
+
+部署脚本复制清单、Mod DLL、头图和默认配置，不修改原版程序集。配置和本地内容会复制到
+Unity 的 `Application.persistentDataPath` 对应目录。
+
+工坊发布目录由 `.\scripts\package-workshop.ps1` 生成到桌面；该目录是上传源文件，订阅用户无需手动复制。
+
+## 未完成与待验证记录
+
+指导书 v1.1 的项目化接入方案、实现状态和验收边界见
+[`docs/GM_Integration_v1.1_Plan_zh-CN.md`](docs/GM_Integration_v1.1_Plan_zh-CN.md)。
+
+以下内容保留为后续工作，不视为当前版本已经完整交付：
+
+- 命名人物的跨天状态往返与冒认身份拦截已通过离线检查；原版剧情台词和说话方式仍需实机确认
+- 验证回访安排与剧情来客、展柜吸引顾客同时存在时的长期稳定性
+- 实机确认第三方目标按原版队列真实到店、到店后二次决定，以及队列满时的原版行为
+- 实机确认原版报纸布局能显示合并新闻，当前顾客报价会读取投影后的买卖价格字段，并在离店后恢复
+- 验证买家临时库存与原版买卖任务并存、限定商品议价和多件交换的边界情况
+- 联网回复耗时已完成分层优化和真实服务测量：普通闲聊、明确行为和 GM 使用不同提示及输出预算；人物请求按意图裁剪上下文；临时上游故障不会触发另一个协议再次长等。当前实测主要瓶颈是所配置中转及其上游排队，详见响应时间诊断文档。
+- 补齐偷窃/警报器/保险候选路径的安全读写验证
+- 重复回复的账簿去重已通过离线检查；队列满时延期、原版对象执行前消失，以及重复回复下的真实游戏副作用仍需实机故障注入。
+- 顾客自由聊天离店的结束语已接通：先显示自然告别，再调用原版离店路径；仍需实机确认不同原版台词链的表现。
+- 自由聊天批发价已绑定 `StoreClient.isOfferWholesale`、`wholesaleDiscount` 和当前原版报价；不一致的折扣或金额会回退为“以收银台报价为准”；仍需实机确认批量物品的最终合计口径。
+- 顾客随身货物展示已改为事实校验：只接受 `owner=client` 的真实物品，支持原版库存与顾客侧柜台，摆放后复核顾客侧柜台；仍需实机确认原版界面刷新时序。
