@@ -1,5 +1,7 @@
 # 《自由聊天&议价&交换》Mod
 
+Steam 创意工坊：[订阅《自由聊天&议价&交换》](https://steamcommunity.com/sharedfiles/filedetails/?id=3829066775)。
+
 ### 《自由聊天&议价&交换》
 
 随心所欲，畅所欲言！
