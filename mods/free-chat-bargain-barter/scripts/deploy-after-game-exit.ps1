@@ -1,4 +1,9 @@
 $ErrorActionPreference = "Stop"
+if ($PSVersionTable.PSEdition -ne "Core") {
+    $pwsh = (Get-Command pwsh.exe -ErrorAction Stop).Source
+    & $pwsh -NoProfile -File $PSCommandPath
+    exit $LASTEXITCODE
+}
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $logDir = Join-Path $projectRoot ".deploy-staging"
 $logPath = Join-Path $logDir "deploy-after-exit.log"

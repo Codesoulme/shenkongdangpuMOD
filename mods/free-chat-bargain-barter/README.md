@@ -2,6 +2,8 @@
 
 Steam 创意工坊：[订阅《自由聊天&议价&交换》](https://steamcommunity.com/sharedfiles/filedetails/?id=3829066775)。
 
+作者更新工坊的步骤见 [工坊更新说明](docs/Workshop_Upload_zh-CN.md)。
+
 ### 《自由聊天&议价&交换》
 
 随心所欲，畅所欲言！
