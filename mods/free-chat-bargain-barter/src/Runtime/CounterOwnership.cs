@@ -46,6 +46,8 @@ internal sealed class CounterOwnershipSnapshot
     public List<GameItem> ClientCounterItems { get; } = new();
     public List<GameItem> PlayerCounterItems { get; } = new();
     public HashSet<int> ClientInventoryIds { get; } = new();
+    // Only keys found in the native customer-side counter grid. The broader
+    // ClientCounterItems list also includes goods still carried by the client.
     public HashSet<int> ClientCounterIds { get; } = new();
     public HashSet<int> PlayerCounterIds { get; } = new();
     public HashSet<int> PlayerOwnedIds { get; } = new();
@@ -127,12 +129,15 @@ internal sealed class CounterOwnershipSnapshot
                 snapshot._owners[pair.Key] = owner;
                 if (owner == CounterItemOwner.Unknown && pair.Value.HasConflict)
                     snapshot._conflictingIds.Add(pair.Key);
+                if (CounterPlacementRules.IsVisibleClientCounterItem(
+                        pair.Value.InClientArea, owner == CounterItemOwner.Client))
+                    snapshot.ClientCounterIds.Add(pair.Key);
 
                 if (owner == CounterItemOwner.Client)
                 {
-                    AddUnique(snapshot.ClientCounterItems, snapshot.ClientCounterIds, pair.Value.Item);
+                    AddUnique(snapshot.ClientCounterItems, null, pair.Value.Item);
                     // ClientInventoryIds is retained for fast lookup, but a
-                    // conflicting key must never be accepted through it.
+                    // carried item must not be treated as physically displayed.
                 }
                 else if (owner == CounterItemOwner.Player)
                 {
