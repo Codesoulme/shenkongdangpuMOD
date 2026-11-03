@@ -78,6 +78,7 @@ internal static class NativeDialogEntry
     private const string HeadEntryObjectName = "AIWorldPawnshop.NativeChatHeadChoice";
     private const float RetryIntervalSeconds = 0.2f;
     private const float PhoneEntryGap = 12f;
+    private const float StoreEntryGap = 12f;
     private const float HeadEntryOffsetX = -19f;
     private const float HeadEntryOffsetY = 250f;
     private const float HeadEntryScale = 0.7f;
@@ -85,6 +86,7 @@ internal static class NativeDialogEntry
     private static float _nextRetryTime;
     private static string _storeSessionKey = string.Empty;
     private static GameObject? _storeHeadEntry;
+    private static GameObject? _storeChoiceEntry;
     private static GameObject? _phoneEntry;
     private static DialogChoiceBubble? _sceneTemplate;
     private static float _nextTemplateSearchTime;
@@ -240,12 +242,134 @@ internal static class NativeDialogEntry
             if (!IsAlive(manager))
                 return;
 
-            Attach(manager!.dialogChoiceBubbles, NativeDialogScene.Store, activeOnly: true);
+            TryUpdateStoreChoiceEntry(manager);
         }
         catch (Exception ex)
         {
             MelonLogger.Error($"[当铺世界] 原版对话选项入口挂载失败：{ex.Message}");
         }
+    }
+
+    private static void TryUpdateStoreChoiceEntry(DialogUIManager? manager)
+    {
+        try
+        {
+            var bubbles = manager?.dialogChoiceBubbles;
+            if (!IsAlive(manager) || !HasActiveNativeChoice(bubbles))
+            {
+                HideStoreChoices();
+                return;
+            }
+
+            var template = FindLastActiveChoice(bubbles);
+            if (!IsAlive(template))
+            {
+                HideStoreChoices();
+                return;
+            }
+
+            var parent = FindLayoutFreeAncestor(template!.transform.parent);
+            if (!IsAlive(parent))
+            {
+                HideStoreChoices();
+                return;
+            }
+
+            var entry = GetOrCreateStoreChoiceEntry(template!, parent!);
+            if (!IsAlive(entry) || !PositionStoreChoiceEntry(entry!, template!, bubbles))
+                HideStoreChoices();
+        }
+        catch (Exception ex)
+        {
+            HideStoreChoices();
+            MelonLogger.Warning($"[当铺世界] 店内自由聊天入口定位失败：{ex.Message}");
+        }
+    }
+
+    private static GameObject? GetOrCreateStoreChoiceEntry(
+        DialogChoiceBubble template,
+        Transform parent)
+    {
+        if (IsAlive(_storeChoiceEntry))
+        {
+            if (_storeChoiceEntry!.transform.parent != parent)
+                _storeChoiceEntry.transform.SetParent(parent, false);
+            var existingBubble = _storeChoiceEntry.GetComponent<DialogChoiceBubble>();
+            if (IsAlive(existingBubble) && ConfigureEntry(existingBubble!, NativeDialogScene.Store))
+                return _storeChoiceEntry;
+            UnityEngine.Object.Destroy(_storeChoiceEntry);
+            _storeChoiceEntry = null;
+        }
+
+        var clone = UnityEngine.Object.Instantiate(template.gameObject, parent, false);
+        if (!IsAlive(clone))
+            return null;
+        clone.name = EntryObjectName;
+        var bubble = clone.GetComponent<DialogChoiceBubble>();
+        if (!IsAlive(bubble) || !ConfigureEntry(bubble!, NativeDialogScene.Store))
+        {
+            UnityEngine.Object.Destroy(clone);
+            return null;
+        }
+        clone.transform.SetAsLastSibling();
+        _storeChoiceEntry = clone;
+        return clone;
+    }
+
+    private static bool PositionStoreChoiceEntry(
+        GameObject entry,
+        DialogChoiceBubble template,
+        System.Collections.Generic.List<DialogChoiceBubble>? bubbles)
+    {
+        if (!IsAlive(entry) || !IsAlive(template) || bubbles is null)
+            return false;
+
+        DialogChoiceBubble? highest = null;
+        var highestTop = float.NegativeInfinity;
+        var corners = new Vector3[4];
+        foreach (var candidate in bubbles)
+        {
+            if (!IsAlive(candidate) || !IsAlive(candidate!.gameObject) ||
+                !candidate.gameObject.activeInHierarchy ||
+                candidate.gameObject.name.Equals(EntryObjectName, StringComparison.Ordinal) ||
+                candidate.gameObject.name.Equals(PhoneEntryObjectName, StringComparison.Ordinal) ||
+                candidate.gameObject.name.Equals(HeadEntryObjectName, StringComparison.Ordinal))
+                continue;
+            var rect = candidate.gameObject.GetComponent<RectTransform>();
+            if (!IsAlive(rect))
+                continue;
+            rect!.GetWorldCorners(corners);
+            var top = MathF.Max(corners[1].y, corners[2].y);
+            if (top <= highestTop)
+                continue;
+            highest = candidate;
+            highestTop = top;
+        }
+
+        if (!IsAlive(highest))
+            return false;
+
+        var entryRect = entry.GetComponent<RectTransform>();
+        if (!IsAlive(entryRect))
+            return false;
+        entry.transform.rotation = highest!.transform.rotation;
+        entry.transform.localScale = template.transform.localScale;
+        var entryHeight = MathF.Abs(entryRect!.rect.height * entryRect.lossyScale.y);
+        var anchorPosition = highest.transform.position;
+        entry.transform.position = new Vector3(
+            anchorPosition.x,
+            highestTop + entryHeight * entryRect.pivot.y + StoreEntryGap,
+            anchorPosition.z);
+        entry.SetActive(true);
+        return entry.activeInHierarchy;
+    }
+
+    private static void HideStoreChoices()
+    {
+        if (IsAlive(_storeChoiceEntry))
+            _storeChoiceEntry!.SetActive(false);
+        else
+            _storeChoiceEntry = null;
     }
 
     public static void AttachPhoneChoices(DialoguePhoneUIManager? manager)
@@ -581,10 +705,12 @@ internal static class NativeDialogEntry
         {
             // The Harmony hook covers the normal path. The poll is a retry for
             // scene transitions where DisplayChoice ran before the list existed.
-            Attach(storeBubbles, NativeDialogScene.Store, activeOnly: true);
+            TryUpdateStoreChoiceEntry(manager);
             HideStoreHeadEntry();
             return;
         }
+
+        HideStoreChoices();
 
         bool clientMoving;
         try
@@ -1108,6 +1234,7 @@ internal static class NativeDialogEntry
         _storeSessionKey = string.Empty;
         _storeHeadUsesPhoneStyle = false;
         _lastHeadPositionLogKey = string.Empty;
+        HideStoreChoices();
         HideStoreHeadEntry();
     }
 
