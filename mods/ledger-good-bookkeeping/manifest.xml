@@ -3,7 +3,7 @@
   <ID>DeepSpacePawnshopLedger</ID>
   <Name>账本：好好记账</Name>
   <Author>一万万</Author>
-  <ModVersion>1.0.1</ModVersion>
+  <ModVersion>1.1.0</ModVersion>
   <Description><![CDATA[
 把每天的信用点收支记清楚。
 
@@ -43,7 +43,6 @@ Customer trades and in-game credit settlements are recorded from their actual ba
   </Assemblies>
   <Capabilities>
     <Capability>files</Capability>
-    <Capability>network</Capability>
     <Capability>dynamic-code</Capability>
     <Capability>reflection-external</Capability>
   </Capabilities>

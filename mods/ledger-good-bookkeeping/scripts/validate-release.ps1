@@ -44,6 +44,9 @@ if ($modVersion -ne $assemblyVersion) {
 
 $capabilities = @($manifest.ModManifest.Capabilities.Capability) |
     ForEach-Object { [string]$_ }
+if ("network" -in $capabilities) {
+    throw "账本不应申请 network 权限。"
+}
 if ("System.Runtime.CompilerServices.Unsafe.dll" -in $actual -and "native" -notin $capabilities) {
     throw "System.Runtime.CompilerServices.Unsafe.dll 需要在清单中声明 native 权限。"
 }

@@ -17,7 +17,7 @@ if (-not (Test-Path $dll)) {
 
 & (Join-Path $PSScriptRoot "validate-release.ps1") -BuildDir $buildDir
 
-New-Item -ItemType Directory -Force -Path $modsDir, $dataDir, (Join-Path $dataDir "Logs") | Out-Null
+New-Item -ItemType Directory -Force -Path $modsDir, $dataDir | Out-Null
 $obsolete = @(
     "Microsoft.Bcl.AsyncInterfaces.dll", "System.Buffers.dll", "System.Memory.dll",
     "System.Numerics.Vectors.dll", "System.Runtime.CompilerServices.Unsafe.dll",
@@ -36,13 +36,4 @@ Copy-Item -LiteralPath (Join-Path $projectRoot "manifest.xml") -Destination (Joi
 if (Test-Path (Join-Path $projectRoot "Content\preview.png")) {
     Copy-Item -LiteralPath (Join-Path $projectRoot "Content\preview.png") -Destination (Join-Path $modsDir "preview.png") -Force
 }
-$configTarget = Join-Path $dataDir "Config.json"
-$contentTarget = Join-Path $dataDir "LocalContent.json"
-if (-not (Test-Path $configTarget)) {
-    Copy-Item -LiteralPath (Join-Path $projectRoot "Content\Config.json") -Destination $configTarget
-}
-if (-not (Test-Path $contentTarget)) {
-    Copy-Item -LiteralPath (Join-Path $projectRoot "Content\LocalContent.json") -Destination $contentTarget
-}
-
 Write-Host "已部署到 $modsDir"

@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFramework>netstandard2.1</TargetFramework>
-    <Version>1.0.1</Version>
+    <Version>1.1.0</Version>
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
@@ -28,10 +28,6 @@
       <HintPath>$(ManagedDir)\Newtonsoft.Json.dll</HintPath>
       <Private>false</Private>
     </Reference>
-    <Reference Include="com.rlabrecque.steamworks.net">
-      <HintPath>$(ManagedDir)\com.rlabrecque.steamworks.net.dll</HintPath>
-      <Private>false</Private>
-    </Reference>
     <Reference Include="UnityEngine.CoreModule">
       <HintPath>$(ManagedDir)\UnityEngine.CoreModule.dll</HintPath>
       <Private>false</Private>
@@ -42,14 +38,6 @@
     </Reference>
     <Reference Include="UnityEngine.UIModule">
       <HintPath>$(ManagedDir)\UnityEngine.UIModule.dll</HintPath>
-      <Private>false</Private>
-    </Reference>
-    <Reference Include="UnityEngine.InputLegacyModule">
-      <HintPath>$(ManagedDir)\UnityEngine.InputLegacyModule.dll</HintPath>
-      <Private>false</Private>
-    </Reference>
-    <Reference Include="UnityEngine.IMGUIModule">
-      <HintPath>$(ManagedDir)\UnityEngine.IMGUIModule.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="UnityEngine.TextRenderingModule">
@@ -63,10 +51,17 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Compile Remove="tools\**" />
-    <None Update="Content\**\*">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
+    <Compile Remove="src\**\*.cs" />
+    <Compile Remove="tools\**\*.cs" />
+    <Compile Include="src\LedgerModEntry.cs" />
+    <Compile Include="src\AssemblyInfo.cs" />
+    <Compile Include="src\ModConstants.cs" />
+    <Compile Include="src\LedgerPatches.cs" />
+    <Compile Include="src\Models\CreditLedgerModels.cs" />
+    <Compile Include="src\Runtime\CreditLedgerRuntime.cs" />
+    <Compile Include="src\Compatibility\LedgerGameAccess.cs" />
+    <Compile Include="src\UI\CreditLedgerUi.cs" />
+    <Compile Include="src\UI\NativeLedgerTab.cs" />
   </ItemGroup>
 
 </Project>

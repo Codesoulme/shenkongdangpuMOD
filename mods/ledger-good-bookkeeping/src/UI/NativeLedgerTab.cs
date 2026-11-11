@@ -147,11 +147,11 @@ internal static class NativeLedgerTab
         if (_section == null || _template == null) return;
         var runtime = AIWorldPawnshopMod.Instance?.Runtime;
         if (runtime == null) return;
-        var currentDay = StoreStation.Instance != null ? StoreStation.Instance.dayCounter : runtime.State.CurrentDay;
+        var currentDay = StoreStation.Instance != null ? StoreStation.Instance.dayCounter : 0;
         if (_selectedDayOffset > 0 && currentDay <= 1)
             _selectedDayOffset = 0;
         var day = Math.Max(1, currentDay - _selectedDayOffset);
-        var data = CreditLedgerUi.Read(runtime.State.CreditLedger, day, _page, PageSize);
+        var data = CreditLedgerUi.Read(runtime.Entries, day, _page, PageSize);
         _page = data.Page;
         if (_body != null)
         {

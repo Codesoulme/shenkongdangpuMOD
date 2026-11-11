@@ -1,5 +1,9 @@
 using System.Diagnostics;
 using Steamworks;
+using System.Xml.Linq;
+
+if (args.Length > 0 && args[0] == "--update-item")
+    return UpdateItem(args);
 
 if (args.Length == 2 && args[0] == "--verify")
     return VerifyPreviews(args[1]);
@@ -159,6 +163,103 @@ static int VerifyPreviews(string idText)
         }
         SteamUGC.ReleaseQueryUGCRequest(query);
         return count == 2 ? 0 : 1;
+    }
+    finally
+    {
+        SteamAPI.Shutdown();
+    }
+}
+
+static int UpdateItem(string[] arguments)
+{
+    if (arguments.Length != 7 ||
+        !ulong.TryParse(arguments[1], out var publishedFileId) ||
+        !int.TryParse(arguments[6], out var visibilityValue) || visibilityValue is < 0 or > 3)
+    {
+        Console.Error.WriteLine("Usage: WorkshopPreviewUpdater --update-item <publishedFileId> <content-folder> <cover.png> <description.txt> <changeNote> <visibility-0-to-3>");
+        return 2;
+    }
+
+    var contentFolder = Path.GetFullPath(arguments[2]);
+    var cover = Path.GetFullPath(arguments[3]);
+    var descriptionPath = Path.GetFullPath(arguments[4]);
+    var changeNote = arguments[5];
+    var manifestPath = Path.Combine(contentFolder, "manifest.xml");
+    if (!File.Exists(manifestPath) || !File.Exists(cover) || !File.Exists(descriptionPath))
+    {
+        Console.Error.WriteLine("The content folder must contain manifest.xml, and the cover and description files must exist.");
+        return 2;
+    }
+
+    var title = XDocument.Load(manifestPath).Root?.Element("Name")?.Value?.Trim();
+    var description = File.ReadAllText(descriptionPath);
+    if (string.IsNullOrWhiteSpace(title) || string.IsNullOrWhiteSpace(description))
+    {
+        Console.Error.WriteLine("The manifest title and description must not be empty.");
+        return 2;
+    }
+
+    if (!SteamAPI.Init())
+    {
+        Console.Error.WriteLine("Steam API initialization failed. Keep Steam running and signed in.");
+        return 1;
+    }
+
+    try
+    {
+        var handle = SteamUGC.StartItemUpdate((AppId_t)4348910, (PublishedFileId_t)publishedFileId);
+        if (handle == UGCUpdateHandle_t.Invalid)
+        {
+            Console.Error.WriteLine("Could not start the Workshop item update.");
+            return 1;
+        }
+
+        if (!SteamUGC.SetItemTitle(handle, title) ||
+            !SteamUGC.SetItemDescription(handle, description) ||
+            !SteamUGC.SetItemVisibility(handle, (ERemoteStoragePublishedFileVisibility)visibilityValue) ||
+            !SteamUGC.SetItemContent(handle, contentFolder) ||
+            !SteamUGC.SetItemPreview(handle, cover))
+        {
+            Console.Error.WriteLine("Steam rejected one or more item update fields.");
+            return 1;
+        }
+
+        var completed = false;
+        var ioFailure = false;
+        var result = EResult.k_EResultNone;
+        var needsTermsAcceptance = false;
+        var callResult = CallResult<SubmitItemUpdateResult_t>.Create((data, failed) =>
+        {
+            result = data.m_eResult;
+            needsTermsAcceptance = data.m_bUserNeedsToAcceptWorkshopLegalAgreement;
+            ioFailure = failed;
+            completed = true;
+        });
+        callResult.Set(SteamUGC.SubmitItemUpdate(handle, changeNote));
+
+        var timer = Stopwatch.StartNew();
+        while (!completed && timer.Elapsed < TimeSpan.FromMinutes(5))
+        {
+            SteamAPI.RunCallbacks();
+            Thread.Sleep(50);
+        }
+
+        if (!completed)
+        {
+            Console.Error.WriteLine("Timed out while updating the Workshop item.");
+            return 1;
+        }
+        if (ioFailure || result != EResult.k_EResultOK)
+        {
+            Console.Error.WriteLine($"Workshop update failed: {result}; IO failure: {ioFailure}.");
+            if (needsTermsAcceptance)
+                Console.Error.WriteLine("Accept the Steam Workshop legal agreement, then retry.");
+            return 1;
+        }
+
+        Console.WriteLine($"Updated Workshop item {publishedFileId}: {title}");
+        Console.WriteLine($"https://steamcommunity.com/sharedfiles/filedetails/?id={publishedFileId}");
+        return 0;
     }
     finally
     {

@@ -1,5 +1,5 @@
 param(
-    [string]$OutputDir = "$env:USERPROFILE\Desktop\FreeChatBargainBarter-Workshop",
+    [string]$OutputDir = "$PSScriptRoot\..\.workshop-submission\DeepSpacePawnshopLedger",
     [string]$Configuration = "Release"
 )
 
@@ -7,7 +7,7 @@ $ErrorActionPreference = "Stop"
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $buildDir = Join-Path $projectRoot "bin\$Configuration\netstandard2.1"
 & (Join-Path $PSScriptRoot "validate-release.ps1") -BuildDir $buildDir
-$required = @("FreeChatBargainBarter.dll")
+$required = @("DeepSpacePawnshopLedger.dll")
 foreach ($name in $required) {
     if (-not (Test-Path -LiteralPath (Join-Path $buildDir $name))) {
         throw "缺少构建产物：$name。请先构建 Release 版本。"
