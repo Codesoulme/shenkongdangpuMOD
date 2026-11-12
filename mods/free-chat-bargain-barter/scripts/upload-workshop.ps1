@@ -14,6 +14,13 @@ $manifestPath = Join-Path $projectRoot "manifest.xml"
 $descriptionPath = Join-Path $projectRoot "Content\WorkshopDescription.txt"
 $publishedFileId = "3829066775"
 
+if (-not (Test-Path -LiteralPath (Join-Path $UploaderDirectory "WorkshopUploader.exe"))) {
+    $cachedUploader = Join-Path $projectRoot "..\..\.workshop-submission\FreeChatUploader"
+    if (Test-Path -LiteralPath (Join-Path $cachedUploader "WorkshopUploader.exe")) {
+        $UploaderDirectory = (Resolve-Path -LiteralPath $cachedUploader).Path
+    }
+}
+
 if (-not (Test-Path -LiteralPath $descriptionPath)) {
     throw "缺少工坊说明：$descriptionPath"
 }
@@ -69,7 +76,10 @@ Set-Content -LiteralPath (Join-Path $uploaderDir "upload.ini") -Value $config -E
 
 Push-Location $uploaderDir
 try {
-    $arguments = if ($Publish) { @("--yes") } else { @() }
+    # Keep a one-element result as an array: splatting a scalar string passes
+    # its individual characters, causing --yes to be silently ignored.
+    [string[]]$arguments = @()
+    if ($Publish) { $arguments = @("--yes") }
     $uploadOutput = & (Join-Path $uploaderDir "WorkshopUploader.exe") @arguments 2>&1
     $uploadOutput | ForEach-Object { Write-Host $_ }
     if ($LASTEXITCODE -ne 0) {
