@@ -221,16 +221,18 @@ internal static class NativeConversationContextBuilder
             var visits = Safe(() => StoreClientManager.GetCustomerTotalVisitedCount(key), 0);
             context.Character.VisitCount = visits;
             context.OriginalStoryFacts.Add($"该身份在原版记录中的累计来访次数：{visits}");
-            if (Contains(manager.arrestedClients, key))
-                context.OriginalStoryFacts.Add("原版记录：这个身份曾被玩家交给治安部门");
+            // OnCriminalVisit adds every wanted arrival to arrestedClients.
+            // Despite its name, that list cannot prove a report or arrest.
         }
 
         AddOriginalTradeHistory(context.OriginalStoryFacts, playerStore, key, displayName);
+        context.OriginalStoryFacts.Add(
+            $"原版本次来访举报状态：{client.reported}；仅表示本次是否执行举报，不代表历史上是否举报或被捕。");
 
         if (client.isWanted)
         {
             context.OriginalStoryFacts.Add(
-                $"原版身份：通缉对象；是否已被玩家举报：{client.reported}；悬赏：{client.reportReward}");
+                $"原版身份：通缉对象；悬赏：{client.reportReward}；通缉身份不代表玩家曾举报此人。");
         }
 
         if (client.isAug && client.isAugScanned)
@@ -345,23 +347,9 @@ internal static class NativeConversationContextBuilder
         StoreClient? client,
         Dialogue? currentDialogue)
     {
-        AddDialogueChain(context.OriginalDialogueContext, "当前原版台词", currentDialogue, 3);
-        if (client is not null && currentDialogue is null)
-            AddDialogueChain(context.OriginalDialogueContext, "本次来访主台词", client.mainDialogue, 6);
-        if (client?.repeatDialogue is not null)
-            AddDialogue(context.OriginalDialogueContext, "原版重复交谈语境", client.repeatDialogue);
-        if (client?.acceptDealDialogue is not null)
-            AddDialogue(context.OriginalDialogueContext, "原版接受交易语气", client.acceptDealDialogue);
-        if (client?.allDoneDialogue is not null)
-            AddDialogue(context.OriginalDialogueContext, "原版结束交易语气", client.allDoneDialogue);
-        if (client?.placedWrongItemWhenSellingToDialogue is not null)
-            AddDialogue(context.OriginalDialogueContext, "原版拒绝错误物品语气", client.placedWrongItemWhenSellingToDialogue);
-        if (client?.placeRightItemWhenSellingToDialogue is not null)
-            AddDialogue(context.OriginalDialogueContext, "原版确认目标物品语气", client.placeRightItemWhenSellingToDialogue);
-        if (client?.interogationDialogue is not null)
-            AddDialogue(context.OriginalDialogueContext, "原版受询问语气", client.interogationDialogue);
-        if (client?.customOnArrestDialogue is not null)
-            AddDialogue(context.OriginalDialogueContext, "原版被捕相关语气", client.customOnArrestDialogue);
+        // Only the active line is observed. Follow-up branches and templates
+        // for arrest, interrogation or deals are not evidence of past events.
+        AddDialogue(context.OriginalDialogueContext, "当前已触发原版台词", currentDialogue);
     }
 
     private static void PopulateOriginalCharacterProfile(
@@ -395,6 +383,8 @@ internal static class NativeConversationContextBuilder
             "只知道当前人物亲历的原版剧情、交易、关系记忆，以及在场可见物品、公开背景和已公开的世界事件。");
         profile.KnowledgeBoundaries.Add(
             "不得把其他顾客、电话联系人或全局对话记录当成自己的经历。");
+        profile.KnowledgeBoundaries.Add(
+            "通缉身份、可被举报或曾来访不等于玩家举报过你；本次举报状态不能当作历史记录。只有明确的剧情事实或已验证行为才能证明经历，台词语气不能证明举报、被捕或成交已经发生。");
         profile.KnowledgeBoundaries.Add(
             "未在档案、当前台词或摘要记忆中出现的身世细节，应保持含糊而不是编造。");
         if (client.isAug && !client.isAugScanned)
@@ -437,7 +427,7 @@ internal static class NativeConversationContextBuilder
         if (client.AcceptingContrabandOverride)
             profile.RoleAndBackground.Add("原版交易立场：此人物被明确允许接触违禁品。");
         if (client.arrestable)
-            profile.RoleAndBackground.Add("原版规则允许该人物被举报或逮捕。");
+            profile.RoleAndBackground.Add("原版规则允许该人物被举报或逮捕；这只是可执行条件，不表示曾经发生。");
 
         if (client.clientBuyingTagList is not null && client.clientBuyingTagList.Count > 0)
             profile.RoleAndBackground.Add("原版采购偏好来自 character.buying_item_types。");
@@ -476,20 +466,6 @@ internal static class NativeConversationContextBuilder
         {
             profile.RoleAndBackground.Add(
                 "这是有固定姓名的原版人物；姓名、阵营、交易偏好和原版台词共同构成其身份，缺失的背景不得自行补写。");
-        }
-    }
-
-    private static void AddDialogueChain(
-        List<string> target,
-        string label,
-        Dialogue? dialogue,
-        int maxLines)
-    {
-        var current = dialogue;
-        for (var i = 0; i < maxLines && current is not null; i++)
-        {
-            AddDialogue(target, i == 0 ? label : $"{label}后续", current);
-            current = Safe<Dialogue?>(() => current.nextDialogue, null);
         }
     }
 
@@ -1055,22 +1031,6 @@ internal static class NativeConversationContextBuilder
             key.ToLowerInvariant(),
             "georgio", "lun", "eleanor", "jackson", "juan", "mentor", "landlord",
             "businesspermit", "wanted", "inventor");
-    }
-
-    private static bool Contains(
-        System.Collections.Generic.List<string>? values,
-        string target)
-    {
-        if (values is null || string.IsNullOrWhiteSpace(target))
-            return false;
-
-        for (var i = 0; i < values.Count; i++)
-        {
-            if (string.Equals(values[i], target, StringComparison.OrdinalIgnoreCase))
-                return true;
-        }
-
-        return false;
     }
 
     private static List<string> CopyStrings(System.Collections.Generic.List<string>? source)

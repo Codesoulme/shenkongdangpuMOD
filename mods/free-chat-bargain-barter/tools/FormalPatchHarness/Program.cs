@@ -2,6 +2,7 @@ using System.Reflection;
 using System.Runtime.Loader;
 using System.Collections;
 using System.Xml.Linq;
+using System.Runtime.Serialization;
 using HarmonyLib;
 
 if (args.Length is < 2 or > 3)
@@ -76,6 +77,7 @@ if (args.Length == 3)
     var gameAssembly = AssemblyLoadContext.Default.LoadFromAssemblyPath(
         Path.Combine(managedDir, "Assembly-CSharp.dll"));
     CheckNativeLoader(gameAssembly, modPath, managedDir, args[2], failures);
+    CheckStoryContext(modAssembly, gameAssembly, failures);
 }
 
 if (failures.Count > 0)
@@ -87,6 +89,82 @@ if (failures.Count > 0)
 
 Console.WriteLine($"Formal patch metadata passed: {patchTypes.Count} patch classes, {methods.Count} game methods.");
 return patchTypes.Count >= 15 ? 0 : 1;
+
+static void CheckStoryContext(Assembly mod, Assembly game, ICollection<string> failures)
+{
+    const BindingFlags flags = BindingFlags.Static | BindingFlags.NonPublic;
+    object Empty(string type) => FormatterServices.GetUninitializedObject(game.GetType(type, true)!);
+    void Set(object target, string name, object value) => target.GetType().GetField(name)!.SetValue(target, value);
+    object Context() => Activator.CreateInstance(mod.GetType("AIWorldPawnshop.Models.GameConversationContext", true)!)!;
+    IList Lines(object context, string name) => (IList)context.GetType().GetProperty(name)!.GetValue(context)!;
+    var builder = mod.GetType("AIWorldPawnshop.Runtime.NativeConversationContextBuilder", true)!;
+    var populateFacts = builder.GetMethod("PopulateOriginalStoryFacts", flags)!;
+    var populateDialogue = builder.GetMethod("PopulateDialogueContext", flags)!;
+    var store = Empty("PlayerStore");
+    var manager = Empty("StoreClientManager");
+    var arrivals = new List<string>();
+    Set(manager, "arrestedClients", arrivals);
+    Set(store, "storeClientManager", manager);
+
+    foreach (var identifier in new[] { "wanted7", "wanted8_weekly" })
+    {
+        var client = Empty("StoreClient");
+        Set(client, "identifier", identifier);
+        Set(client, "isWanted", true);
+        // Use the actual native arrival method: it writes arrestedClients even
+        // though no report action has happened.
+        game.GetType("PlayerStore", true)!.GetMethod("OnCriminalVisit")!.Invoke(store, new[] { client });
+        if (!arrivals.Contains(identifier))
+            failures.Add("Fixture failed: native criminal arrival did not register " + identifier);
+        var context = Context();
+        populateFacts.Invoke(null, new[] { context, store, client, identifier, "Test visitor" });
+        if (Lines(context, "OriginalStoryFacts").Cast<string>().Any(line => line.Contains("曾被玩家交给治安部门")))
+            failures.Add("Arrival was falsely described as a player arrest: " + identifier);
+        var facts = Lines(context, "OriginalStoryFacts").Cast<string>().ToArray();
+        if (!facts.Any(line => line.Contains("本次来访举报状态：False")))
+            failures.Add("Current unreported state was lost: " + identifier);
+        Set(client, "reported", true);
+        var reported = Context();
+        populateFacts.Invoke(null, new[] { reported, store, client, identifier, "Test visitor" });
+        if (!Lines(reported, "OriginalStoryFacts").Cast<string>().Any(line => line.Contains("本次来访举报状态：True")))
+            failures.Add("An actual current report was incorrectly suppressed: " + identifier);
+    }
+
+    object Dialogue(string text)
+    {
+        var dialogue = Empty("Dialogue");
+        Set(dialogue, "plainText", text);
+        return dialogue;
+    }
+    var visitor = Empty("StoreClient");
+    var current = Dialogue("CURRENT_LINE");
+    Set(current, "nextDialogue", Dialogue("FUTURE_BRANCH_NOT_OCCURRED"));
+    Set(visitor, "mainDialogue", Dialogue("UNPLAYED_OPENING"));
+    Set(visitor, "customOnArrestDialogue", Dialogue("UNTRIGGERED_ARREST"));
+    Set(visitor, "interogationDialogue", Dialogue("UNTRIGGERED_INTERROGATION"));
+    Set(visitor, "acceptDealDialogue", Dialogue("UNTRIGGERED_DEAL"));
+    var active = Context();
+    populateDialogue.Invoke(null, new[] { active, visitor, current });
+    var activeLines = string.Join("\n", Lines(active, "OriginalDialogueContext").Cast<string>());
+    if (!activeLines.Contains("CURRENT_LINE") || activeLines.Contains("NOT_OCCURRED") || activeLines.Contains("UNTRIGGERED"))
+        failures.Add("Dialogue context includes an unplayed story branch or loses the current line.");
+    var idle = Context();
+    populateDialogue.Invoke(null, new[] { idle, visitor, null });
+    if (Lines(idle, "OriginalDialogueContext").Count != 0)
+        failures.Add("Idle dialogue context includes unplayed lines as personal history.");
+    var arrested = Context();
+    populateDialogue.Invoke(null, new[] { arrested, visitor, Dialogue("ACTUAL_ARREST_LINE") });
+    if (!Lines(arrested, "OriginalDialogueContext").Cast<string>().Any(line => line.Contains("ACTUAL_ARREST_LINE")))
+        failures.Add("A genuinely active arrest dialogue was incorrectly removed.");
+    var lunFacts = new List<string>();
+    var story = Empty("StoreClientData");
+    Set(story, "officerLunArrested", true);
+    builder.GetMethod("AddCharacterSpecificStoryFacts", flags)!.Invoke(null,
+        new object[] { lunFacts, "officerlun", story, store });
+    if (!lunFacts.Any(line => line.Contains("是否曾被逮捕 True")))
+        failures.Add("A confirmed native character story fact was incorrectly removed.");
+    Console.WriteLine("Native story provenance checked: criminal arrivals and unplayed dialogue branches.");
+}
 
 static void CheckNativeLoader(Assembly game, string modPath, string managedDir,
     string manifestPath, ICollection<string> failures)
