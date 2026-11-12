@@ -29,6 +29,28 @@ try
     };
     var probe = await OpenAiCompatibleProvider.TestConnectionAsync(client, profile);
     Check(probe.Succeeded, "connection probe failed: " + probe.Message);
+    Check(probe.ElapsedMilliseconds >= 25, "successful probe did not include response wait time");
+
+    using (var failureHandler = new ProbeTimingHandler(HttpStatusCode.Forbidden))
+    using (var failureClient = new HttpClient(failureHandler))
+    {
+        var failure = await OpenAiCompatibleProvider.TestConnectionAsync(failureClient, profile);
+        Check(!failure.Succeeded && failure.StatusCode == 403 && failure.ElapsedMilliseconds >= 25,
+            "failed probe did not preserve HTTP status and elapsed time");
+    }
+    using (var fallbackHandler = new ProbeTimingHandler(HttpStatusCode.NotFound, HttpStatusCode.OK))
+    using (var fallbackClient = new HttpClient(fallbackHandler))
+    {
+        var auto = profile.Clone();
+        auto.Protocol = "auto";
+        var fallback = await OpenAiCompatibleProvider.TestConnectionAsync(fallbackClient, auto);
+        Check(fallback.Succeeded && fallbackHandler.Calls == 2 && fallback.ElapsedMilliseconds >= 60,
+            "probe duration did not include both protocol attempts");
+        auto.AllowNetwork = false;
+        var disabled = await OpenAiCompatibleProvider.TestConnectionAsync(fallbackClient, auto);
+        Check(!disabled.Succeeded && disabled.ElapsedMilliseconds is null && fallbackHandler.Calls == 2,
+            "disabled networking must not send or report a fabricated latency");
+    }
     var provider = new OpenAiCompatibleProvider(client, profile);
     var reply = await provider.CompleteAsync(new ConversationRequest
     {
@@ -64,9 +86,33 @@ sealed class StubHandler : HttpMessageHandler
         if (!body.Contains("\"model\":\"test-model\""))
             throw new InvalidOperationException("request JSON was not serialized");
         Calls++;
+        if (Calls == 1)
+            await Task.Delay(40, cancellationToken);
         var content = Calls == 1
             ? "{\"choices\":[{\"message\":{\"content\":\"OK\"}}]}"
             : "{\"choices\":[{\"message\":{\"content\":\"{\\\"npc_reply\\\":\\\"收到\\\"}\"}}]}";
         return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(content) };
+    }
+}
+
+sealed class ProbeTimingHandler : HttpMessageHandler
+{
+    private readonly Queue<HttpStatusCode> _statuses;
+    public int Calls { get; private set; }
+
+    public ProbeTimingHandler(params HttpStatusCode[] statuses) => _statuses = new(statuses);
+
+    protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,
+        CancellationToken cancellationToken)
+    {
+        Calls++;
+        await Task.Delay(40, cancellationToken);
+        var status = _statuses.Dequeue();
+        var body = status == HttpStatusCode.OK
+            ? (request.RequestUri!.AbsolutePath.EndsWith("/responses", StringComparison.Ordinal)
+                ? "{\"output_text\":\"OK\"}"
+                : "{\"choices\":[{\"message\":{\"content\":\"OK\"}}]}")
+            : "{\"error\":{\"message\":\"test failure\"}}";
+        return new HttpResponseMessage(status) { Content = new StringContent(body) };
     }
 }

@@ -179,6 +179,7 @@ public sealed class OpenAiCompatibleProvider : IModelProvider
             return ModelConnectionResult.Failure("模型名称不能为空");
 
         var attempts = new List<RequestAttempt>();
+        var watch = Stopwatch.StartNew();
         foreach (var protocol in GetProtocolOrder(candidate))
         {
             var attempt = await SendProbeAsync(
@@ -192,7 +193,7 @@ public sealed class OpenAiCompatibleProvider : IModelProvider
             if (attempt.Succeeded)
             {
                 return ModelConnectionResult.SuccessResult(
-                    $"连接成功，已使用 {ProtocolLabel(protocol)} 协议");
+                    $"连接成功，已使用 {ProtocolLabel(protocol)} 协议", watch.ElapsedMilliseconds);
             }
 
             if (!ShouldTryAlternative(candidate, attempt))
@@ -205,7 +206,7 @@ public sealed class OpenAiCompatibleProvider : IModelProvider
             : string.Join("；", attempts.Select(attempt => attempt.Error));
         return ModelConnectionResult.Failure(
             ShortenError(message, 420),
-            last?.StatusCode);
+            last?.StatusCode, watch.ElapsedMilliseconds);
     }
 
     private async Task<RequestAttempt> SendConversationAsync(
@@ -1472,17 +1473,20 @@ public sealed class ModelConnectionResult
     public bool Succeeded { get; }
     public string Message { get; }
     public int? StatusCode { get; }
+    /// <summary>Total probe duration, including automatic protocol fallback; null before any request.</summary>
+    public long? ElapsedMilliseconds { get; }
 
-    private ModelConnectionResult(bool succeeded, string message, int? statusCode)
+    private ModelConnectionResult(bool succeeded, string message, int? statusCode, long? elapsedMilliseconds)
     {
         Succeeded = succeeded;
         Message = message;
         StatusCode = statusCode;
+        ElapsedMilliseconds = elapsedMilliseconds;
     }
 
-    public static ModelConnectionResult SuccessResult(string message) =>
-        new(true, message, null);
+    public static ModelConnectionResult SuccessResult(string message, long? elapsedMilliseconds = null) =>
+        new(true, message, null, elapsedMilliseconds);
 
-    public static ModelConnectionResult Failure(string message, int? statusCode = null) =>
-        new(false, message, statusCode);
+    public static ModelConnectionResult Failure(string message, int? statusCode = null, long? elapsedMilliseconds = null) =>
+        new(false, message, statusCode, elapsedMilliseconds);
 }

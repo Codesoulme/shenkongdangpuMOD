@@ -76,6 +76,8 @@ Conversation and necessary trade context are sent to the service you configure. 
 
 0.4.6 适配新版原生 `ModReflect` 与 `ModHelper.RunInBackground`，清单仅保留文件和网络权限。正式版游戏程序集也参与资料指纹，代码更新后会自动重建目录。验证范围见 [兼容报告](docs/Compatibility_20261112_zh-CN.md)。
 
+0.4.7：自由聊天输入框获得焦点时，可按主键盘 Enter 或小键盘回车发送；中文输入法正在选字时不发送。其他输入框、原版按钮和快捷键保持各自原有行为。F10「测试接口」会在成功或失败结果中显示请求耗时（毫秒），包含完整响应和自动协议切换时间；未发出请求的配置错误不显示耗时。
+
 v2 架构设计：GM 系统（旧版设计文档仍保留历史名称）
 
 当前实现的模块与数据流见 [Mod 架构图](docs/Architecture_zh-CN.md)。

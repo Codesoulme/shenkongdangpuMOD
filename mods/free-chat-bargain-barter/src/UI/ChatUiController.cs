@@ -3,6 +3,7 @@ using AIWorldPawnshop.Compatibility;
 using AIWorldPawnshop.Models;
 using AIWorldPawnshop.Runtime;
 using MelonLoader;
+using TMPro;
 using UnityEngine;
 
 namespace AIWorldPawnshop.UI;
@@ -24,12 +25,27 @@ public sealed class ChatUiController
     private long _requestStartedTimestamp;
     private Action<string>? _replyPresenter;
     private bool _loggedFailure;
+    private bool _submitPending;
+    private bool _refocusInput;
+    private bool _wasComposing;
 
     public bool IsOpen => _window is not null && _window.IsAlive && _window.IsVisible;
 
     public void Update(WorldRuntime runtime)
     {
         PollReply(runtime);
+        if (_submitPending)
+        {
+            _submitPending = false;
+            Send(runtime);
+        }
+        if (_refocusInput)
+        {
+            _refocusInput = false;
+            if (IsOpen)
+                _window?.Get("input")?.input?.ActivateInputField();
+        }
+        _wasComposing = IsOpen && !string.IsNullOrEmpty(Input.compositionString);
     }
 
     public void OpenFromBubble(WorldRuntime runtime, string scene = "store")
@@ -64,7 +80,7 @@ public sealed class ChatUiController
             builder.AddLabel(
                 $"当前{(scene.Equals("phone", StringComparison.OrdinalIgnoreCase) ? "联系人" : "客人")}：{_characterName}",
                 "header");
-            builder.AddInput("输入一句话", string.Empty,
+            builder.AddInput("输入一句话，按回车发送", string.Empty,
                 new Action<string>(text => _pendingText = text), "input");
             builder.AddButton("发送", new Action(() => Send(runtime)), "send");
             builder.AddButton("查看关系", new Action(() => AIWorldPawnshopMod.Instance?.OpenWorldPage()), "relations");
@@ -72,6 +88,27 @@ public sealed class ChatUiController
             builder.End();
             _window = builder.Show();
             LocalizedInputFontFix.Apply(_window, "header", "input");
+            var input = _window.Get("input")?.input;
+            if (input is not null)
+            {
+                input.lineType = TMP_InputField.LineType.SingleLine;
+                input.onSubmit.AddListener(text =>
+                {
+                    // Only this focused chat input submits. Blurring the field,
+                    // confirming an IME candidate, and other windows never send.
+                    if (!IsOpen || !input.isFocused ||
+                        (!Input.GetKeyDown(KeyCode.Return) && !Input.GetKeyDown(KeyCode.KeypadEnter)))
+                        return;
+                    _refocusInput = true;
+                    if (_wasComposing || !string.IsNullOrEmpty(Input.compositionString) ||
+                        _pendingReply is not null)
+                        return;
+                    _pendingText = text;
+                    // TMP deactivates the field after onSubmit and then emits
+                    // onEndEdit. Send on the next update after both have finished.
+                    _submitPending = true;
+                });
+            }
             MelonLogger.Msg("[当铺世界] 已打开原版对话入口的输入框");
         }
         catch (Exception ex)
@@ -91,6 +128,9 @@ public sealed class ChatUiController
         _pendingRequest = null;
         _requestStartedTimestamp = 0;
         _replyPresenter = null;
+        _submitPending = false;
+        _refocusInput = false;
+        _wasComposing = false;
         var window = _window;
         _window = null;
         window?.Close();

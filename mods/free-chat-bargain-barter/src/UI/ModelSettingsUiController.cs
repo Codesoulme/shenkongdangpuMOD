@@ -259,8 +259,11 @@ public sealed class ModelSettingsUiController
         try
         {
             var result = task.GetAwaiter().GetResult();
-            SetStatus(result.Succeeded ? $"成功：{result.Message}" : $"失败：{result.Message}");
-            MelonLogger.Msg($"[当铺世界] 模型接口检测结果：{result.Message}");
+            var duration = result.ElapsedMilliseconds is long elapsed
+                ? $"（请求耗时 {elapsed.ToString(CultureInfo.InvariantCulture)} ms）"
+                : string.Empty;
+            SetStatus($"{(result.Succeeded ? "成功" : "失败")}{duration}：{result.Message}");
+            MelonLogger.Msg($"[当铺世界] 模型接口检测结果{duration}：{result.Message}");
         }
         catch (Exception ex)
         {

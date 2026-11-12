@@ -6,7 +6,7 @@
 
 | 模组 | 目录 | Mod ID | 当前版本 | 简介 | Steam 创意工坊 |
 |---|---|---|---|---|---|
-| 自由聊天&议价&交换 | [`mods/free-chat-bargain-barter/`](mods/free-chat-bargain-barter/) | `FreeChatBargainBarter` | 0.4.6 | 顾客自由交谈、议价与物品交换 | [订阅](https://steamcommunity.com/sharedfiles/filedetails/?id=3829066775) |
+| 自由聊天&议价&交换 | [`mods/free-chat-bargain-barter/`](mods/free-chat-bargain-barter/) | `FreeChatBargainBarter` | 0.4.7 | 顾客自由交谈、议价与物品交换 | [订阅](https://steamcommunity.com/sharedfiles/filedetails/?id=3829066775) |
 | 账本：好好记账 | [`mods/ledger-good-bookkeeping/`](mods/ledger-good-bookkeeping/) | `DeepSpacePawnshopLedger` | 1.1.0 | 在原生日历查看当天与昨天的信用点流水 | [订阅](https://steamcommunity.com/sharedfiles/filedetails/?id=3832110492) |
 
 ## 仓库结构
