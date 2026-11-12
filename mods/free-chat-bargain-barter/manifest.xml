@@ -3,7 +3,7 @@
   <ID>FreeChatBargainBarter</ID>
   <Name>自由聊天&amp;议价&amp;交换</Name>
   <Author>一万万</Author>
-  <ModVersion>0.4.5</ModVersion>
+  <ModVersion>0.4.6</ModVersion>
   <Description><![CDATA[
 ### 《自由聊天&议价&交换》
 
@@ -82,7 +82,5 @@ Conversation and necessary trade context are sent to the service you configure. 
   <Capabilities>
     <Capability>files</Capability>
     <Capability>network</Capability>
-    <Capability>dynamic-code</Capability>
-    <Capability>reflection-external</Capability>
   </Capabilities>
 </ModManifest>

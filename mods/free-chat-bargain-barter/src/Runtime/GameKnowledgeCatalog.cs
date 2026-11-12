@@ -51,11 +51,17 @@ public sealed class GameKnowledgeSnapshot
 
 public static class GameSourceFingerprint
 {
-    public static GameKnowledgeSnapshot Capture(string gameDirectory, GameKnowledgeSnapshot? previous = null)
+    public static GameKnowledgeSnapshot Capture(string gameDirectory, GameKnowledgeSnapshot? previous = null,
+        CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var result = new GameKnowledgeSnapshot();
         var data = Path.Combine(gameDirectory, "Probably Stolen_Data");
         var files = new List<string>();
+        // Formal releases use Mono; code-only updates can leave all assets unchanged.
+        AddIfExists(files, Path.Combine(data, "Managed", "Assembly-CSharp.dll"));
+        AddIfExists(files, Path.Combine(data, "Managed", "Assembly-CSharp-firstpass.dll"));
+        AddIfExists(files, Path.Combine(data, "globalgamemanagers"));
         AddIfExists(files, Path.Combine(gameDirectory, "GameAssembly.dll"));
         AddIfExists(files, Path.Combine(data, "il2cpp_data", "Metadata", "global-metadata.dat"));
         AddIfExists(files, Path.Combine(data, "resources.assets"));
@@ -79,13 +85,14 @@ public static class GameSourceFingerprint
         foreach (var path in files.Distinct(StringComparer.OrdinalIgnoreCase)
                      .OrderBy(x => x, StringComparer.OrdinalIgnoreCase))
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var info = new FileInfo(path);
             var relative = Path.GetRelativePath(gameDirectory, path).Replace('\\', '/');
             var hash = oldFiles.TryGetValue(relative, out var old) &&
                        old.Length == info.Length && old.WriteTicks == info.LastWriteTimeUtc.Ticks &&
                        !string.IsNullOrWhiteSpace(old.Hash)
                 ? old.Hash
-                : HashFile(path);
+                : HashFile(path, cancellationToken);
             result.Files.Add(new GameSourceFile
             {
                 Path = relative,
@@ -106,11 +113,20 @@ public static class GameSourceFingerprint
             files.Add(path);
     }
 
-    private static string HashFile(string path)
+    private static string HashFile(string path, CancellationToken cancellationToken)
     {
         using var stream = File.OpenRead(path);
         using var sha = SHA256.Create();
-        return RuntimeCompat.ToHex(sha.ComputeHash(stream));
+        var buffer = new byte[65536];
+        int count;
+        while ((count = stream.Read(buffer, 0, buffer.Length)) > 0)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            sha.TransformBlock(buffer, 0, count, null, 0);
+        }
+        cancellationToken.ThrowIfCancellationRequested();
+        sha.TransformFinalBlock(Array.Empty<byte>(), 0, 0);
+        return RuntimeCompat.ToHex(sha.Hash!);
     }
 }
 
@@ -119,7 +135,8 @@ public sealed class GameKnowledgeCatalog
     public const int Schema = 1;
     private const int ItemsPerFrame = 6;
     private readonly string _path;
-    private readonly Task<GameKnowledgeSnapshot> _fingerprintTask;
+    private readonly string _gameDirectory;
+    private Task<GameKnowledgeSnapshot>? _fingerprintTask;
     private GameKnowledgeSnapshot _snapshot;
     private GameKnowledgeSnapshot? _building;
     private List<string>? _itemKeys;
@@ -134,13 +151,33 @@ public sealed class GameKnowledgeCatalog
     {
         _path = Path.Combine(dataRoot, "GameKnowledgeCatalog.json");
         _snapshot = Load(_path);
-        _fingerprintTask = Task.Run(() => GameSourceFingerprint.Capture(gameDirectory, _snapshot));
+        _gameDirectory = gameDirectory;
     }
 
     public GameKnowledgeSnapshot Snapshot => _snapshot;
 
     public void Tick()
     {
+        if (_fingerprintTask is null)
+        {
+            var completion = new TaskCompletionSource<GameKnowledgeSnapshot>(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            try
+            {
+                // OnEnable runs before the loader registers the mod as running.
+                // Start on Tick, and let the native loader cancel work on disable.
+                var previous = _snapshot;
+                if (!ModHelper.RunInBackground(ModConstants.ModId, token =>
+                    {
+                        try { completion.TrySetResult(GameSourceFingerprint.Capture(_gameDirectory, previous, token)); }
+                        catch (OperationCanceledException) { completion.TrySetCanceled(); }
+                        catch (Exception ex) { completion.TrySetException(ex); }
+                    }))
+                    return;
+            }
+            catch (Exception ex) { completion.TrySetException(ex); }
+            _fingerprintTask = completion.Task;
+        }
         if (!_fingerprintHandled && _fingerprintTask.IsCompleted)
         {
             _fingerprintHandled = true;

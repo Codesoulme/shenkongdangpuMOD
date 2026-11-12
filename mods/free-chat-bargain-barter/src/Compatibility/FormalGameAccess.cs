@@ -1,4 +1,3 @@
-using System.Reflection;
 using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
@@ -7,14 +6,11 @@ namespace AIWorldPawnshop.Compatibility;
 
 /// <summary>
 /// Version boundary for the formal game's private backing fields.  The
-/// public API is preferred wherever the release exposes one; reflection is
-/// kept here so version-specific access does not leak into the adapters.
+/// public API is preferred wherever the release exposes one; private access
+/// uses the game's scoped ModReflect API at this version boundary.
 /// </summary>
 internal static class FormalGameAccess
 {
-    private const BindingFlags InstanceFlags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
-    private const BindingFlags StaticFlags = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
-
     public static StoreClient? GetClient(StoreClientInstance? instance)
     {
         if (instance is null)
@@ -127,8 +123,7 @@ internal static class FormalGameAccess
     {
         try
         {
-            var method = typeof(LootRegistry).GetMethod("RebuildIfDirty", StaticFlags);
-            method?.Invoke(null, null);
+            ModReflect.CallStatic(typeof(LootRegistry), "RebuildIfDirty");
         }
         catch { }
     }
@@ -137,8 +132,7 @@ internal static class FormalGameAccess
     {
         try
         {
-            var field = instance.GetType().GetField(name, InstanceFlags);
-            var value = field?.GetValue(instance);
+            var value = ModReflect.Get(instance, name);
             if (value is T typed)
                 return typed;
         }

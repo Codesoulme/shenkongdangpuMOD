@@ -946,6 +946,9 @@ void GameKnowledgeFingerprintAndVisibilityFlow()
     var assembly = Path.Combine(gameRoot, "GameAssembly.dll");
     File.WriteAllText(assembly, "game-content-a");
     var first = GameSourceFingerprint.Capture(gameRoot);
+    Assert(first.Files.Single().Hash == Convert.ToHexString(
+            System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(assembly))),
+        "可取消的分块哈希必须兼容原有 SHA-256 指纹格式。");
     File.SetLastWriteTimeUtc(assembly, DateTime.UtcNow.AddMinutes(-2));
     var sameContent = GameSourceFingerprint.Capture(gameRoot, first);
     Assert(first.Fingerprint == sameContent.Fingerprint,
@@ -954,6 +957,32 @@ void GameKnowledgeFingerprintAndVisibilityFlow()
     var changed = GameSourceFingerprint.Capture(gameRoot, sameContent);
     Assert(first.Fingerprint != changed.Fingerprint,
         "原版资源内容改变后未触发新指纹。 ");
+
+    var formalRoot = Path.Combine(root, "knowledge-formal-game");
+    var managed = Path.Combine(formalRoot, "Probably Stolen_Data", "Managed");
+    Directory.CreateDirectory(managed);
+    var formalAssembly = Path.Combine(managed, "Assembly-CSharp.dll");
+    File.WriteAllText(formalAssembly, "formal-code-a");
+    var formalFirst = GameSourceFingerprint.Capture(formalRoot);
+    Assert(formalFirst.Files.Any(x => x.Path.EndsWith("Managed/Assembly-CSharp.dll", StringComparison.Ordinal)),
+        "正式版程序集没有进入资料更新检测。");
+    File.SetLastWriteTimeUtc(formalAssembly, DateTime.UtcNow.AddMinutes(-3));
+    var formalSame = GameSourceFingerprint.Capture(formalRoot, formalFirst);
+    Assert(formalSame.Fingerprint == formalFirst.Fingerprint,
+        "正式版代码内容未变时不应重新扫描。");
+    File.WriteAllText(formalAssembly, "formal-code-b");
+    File.SetLastWriteTimeUtc(formalAssembly, DateTime.UtcNow.AddMinutes(-1));
+    var formalChanged = GameSourceFingerprint.Capture(formalRoot, formalSame);
+    Assert(formalChanged.Fingerprint != formalFirst.Fingerprint,
+        "正式版仅更新代码时未使旧资料失效。");
+    using (var cancelled = new CancellationTokenSource())
+    {
+        cancelled.Cancel();
+        var stopped = false;
+        try { GameSourceFingerprint.Capture(formalRoot, cancellationToken: cancelled.Token); }
+        catch (OperationCanceledException) { stopped = true; }
+        Assert(stopped, "关闭模组后资料检查没有响应取消。");
+    }
 
     changed.Items.Add(new GameKnowledgeItem
     {

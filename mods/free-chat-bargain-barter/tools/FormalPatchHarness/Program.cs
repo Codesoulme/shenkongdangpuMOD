@@ -1,10 +1,12 @@
 using System.Reflection;
 using System.Runtime.Loader;
+using System.Collections;
+using System.Xml.Linq;
 using HarmonyLib;
 
-if (args.Length != 2)
+if (args.Length is < 2 or > 3)
 {
-    Console.Error.WriteLine("Usage: FormalPatchHarness <mod dll> <game directory>");
+    Console.Error.WriteLine("Usage: FormalPatchHarness <mod dll> <game directory> [manifest.xml]");
     return 2;
 }
 
@@ -69,6 +71,13 @@ foreach (var patchType in patchTypes)
     }
 }
 
+if (args.Length == 3)
+{
+    var gameAssembly = AssemblyLoadContext.Default.LoadFromAssemblyPath(
+        Path.Combine(managedDir, "Assembly-CSharp.dll"));
+    CheckNativeLoader(gameAssembly, modPath, managedDir, args[2], failures);
+}
+
 if (failures.Count > 0)
 {
     foreach (var failure in failures)
@@ -78,3 +87,61 @@ if (failures.Count > 0)
 
 Console.WriteLine($"Formal patch metadata passed: {patchTypes.Count} patch classes, {methods.Count} game methods.");
 return patchTypes.Count >= 15 ? 0 : 1;
+
+static void CheckNativeLoader(Assembly game, string modPath, string managedDir,
+    string manifestPath, ICollection<string> failures)
+{
+    var manifest = XDocument.Load(manifestPath).Root!;
+    var declared = manifest.Element("Capabilities")!.Elements("Capability")
+        .Select(element => element.Value).ToHashSet(StringComparer.Ordinal);
+    var retiring = new[] { "dynamic-code", "reflection-external", "native", "threads" };
+    foreach (var retired in retiring)
+        if (declared.Contains(retired))
+            failures.Add($"Manifest still requests retiring capability {retired}.");
+
+    // Pass the same game references the loader collects in Unity. Do not run
+    // the loader lifecycle, modify its trust state, or enable the mod here.
+    var allowed = Directory.EnumerateFiles(managedDir, "*.dll", SearchOption.AllDirectories)
+        .Select(Path.GetFileNameWithoutExtension).ToArray();
+    var scanner = game.GetType("ModScanner", throwOnError: true)!;
+    var scan = scanner.GetMethod("Scan")!.Invoke(null,
+        new object?[] { new[] { modPath }, allowed, null, false })!;
+    var scanType = scan.GetType();
+    var error = scanType.GetField("Error")!.GetValue(scan) as string;
+    if (error is not null)
+        failures.Add("Native scanner error: " + error);
+    foreach (var finding in (IEnumerable)scanType.GetField("HardFlags")!.GetValue(scan)!)
+        failures.Add("Native scanner refused: " + finding);
+    var detected = ((IEnumerable<string>)scanType.GetField("Capabilities")!.GetValue(scan)!).ToArray();
+    foreach (var missing in detected.Except(declared))
+        failures.Add("Native scanner found undeclared capability: " + missing);
+    foreach (var retired in detected.Intersect(retiring))
+        failures.Add("Native scanner found retiring capability: " + retired);
+    Console.WriteLine("Native loader scan: " + string.Join(", ", detected));
+    foreach (var finding in (IEnumerable)scanType.GetField("Pending")!.GetValue(scan)!)
+        failures.Add("Native scanner pending rule: " + finding);
+
+    var members = new (string Type, string Field, string ValueType)[]
+    {
+        ("StoreClientInstance", "storeClient", "StoreClient"),
+        ("StoreClientInstance", "gridInv", "GameGridInventory"),
+        ("DialogChoiceBubble", "button", "UnityEngine.UI.Button"),
+        ("NegociationUIManager", "frame", "NegotiationTabletFrame"),
+        ("PhoneUIManager", "currentNumber", "System.Int64"),
+        ("BargainUIManager", "trackedClient", "StoreClient"),
+        ("BargainUIManager", "markupApplied", "System.Boolean"),
+        ("BargainUIManager", "buyingDiscountApplied", "System.Boolean")
+    };
+    foreach (var member in members)
+    {
+        var field = game.GetType(member.Type, true)!.GetField(member.Field,
+            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+        if (field?.FieldType.FullName != member.ValueType)
+            failures.Add($"Native field changed: {member.Type}.{member.Field} ({member.ValueType}).");
+    }
+    if (game.GetType("LootRegistry", true)!.GetMethod("RebuildIfDirty",
+            BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic,
+            binder: null, types: Type.EmptyTypes, modifiers: null) is null)
+        failures.Add("Native method changed: LootRegistry.RebuildIfDirty().");
+    Console.WriteLine($"Native backing fields checked: {members.Length}.");
+}

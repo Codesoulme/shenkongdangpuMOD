@@ -72,7 +72,9 @@ Press `F10` in-game to configure an OpenAI-compatible model endpoint. Local fall
 
 Conversation and necessary trade context are sent to the service you configure. Check that provider's privacy policy and billing terms before use.
 
-目标版本：Probably Stolen 正式版 0.46D（AppID 4348910，ModLoader 100-Rev1）
+目标版本：Probably Stolen 正式版 0.46D（AppID 4348910，Steam Build 26525552；ModLoader 扫描器 v4）。
+
+0.4.6 适配新版原生 `ModReflect` 与 `ModHelper.RunInBackground`，清单仅保留文件和网络权限。正式版游戏程序集也参与资料指纹，代码更新后会自动重建目录。验证范围见 [兼容报告](docs/Compatibility_20261112_zh-CN.md)。
 
 v2 架构设计：GM 系统（旧版设计文档仍保留历史名称）
 

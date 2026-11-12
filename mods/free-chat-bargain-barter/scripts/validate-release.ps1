@@ -44,6 +44,10 @@ if ($modVersion -ne $assemblyVersion) {
 
 $capabilities = @($manifest.ModManifest.Capabilities.Capability) |
     ForEach-Object { [string]$_ }
+$retiring = @($capabilities | Where-Object { $_ -in @("dynamic-code", "reflection-external", "native", "threads") })
+if ($retiring.Count -gt 0) {
+    throw "新版加载器正在停用以下权限，请使用原生接口：$($retiring -join ', ')"
+}
 if ("System.Runtime.CompilerServices.Unsafe.dll" -in $actual -and "native" -notin $capabilities) {
     throw "System.Runtime.CompilerServices.Unsafe.dll 需要在清单中声明 native 权限。"
 }
