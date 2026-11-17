@@ -15,7 +15,7 @@ internal static class NativeLedgerTab
     private static TextMeshProUGUI? _template;
     private static int _page;
     private static int _selectedDayOffset;
-    private const int PageSize = 6;
+    private const int PageSize = 4;
     private static readonly Color Ink = new(0.25f, 0.25f, 0.25f, 1f);
     private static readonly Color Income = new(0.21f, 0.42f, 0.26f, 1f);
     private static readonly Color Expense = new(0.61f, 0.23f, 0.20f, 1f);
@@ -74,7 +74,8 @@ internal static class NativeLedgerTab
     internal static void Open(AdvCalendarUIManager manager)
     {
         Attach(manager);
-        ShowLedger(manager);
+        // OpenUI already selects the game's original calendar page.
+        ShowCalendar(manager);
     }
 
     internal static void Hide(AdvCalendarUIManager manager)
@@ -172,31 +173,34 @@ internal static class NativeLedgerTab
         Metric(_body, "收入", data.Income, 0, Income, fontSize);
         Metric(_body, "支出", data.Expense, .34f, Expense, fontSize);
         Metric(_body, "净额", data.Income - data.Expense, .68f, Ink, fontSize);
-        var columns = new[] { 0f, .06f, .18f, .34f, .52f, .90f, 1f };
-        var names = new[] { "序号", "收支", "顾客", "交易类型", "物品 / 明细", "信用点" };
+        var columns = new[] { 0f, .065f, .18f, .30f, .51f, .75f, .86f, 1f };
+        var names = new[] { "收支", "顾客", "交易类型", "物品", "明细", "收支金额", "剩余信用点" };
         Band(_body, "Header", 0, .60f, 1, .67f, new Color(.61f, .23f, .20f, .15f));
         for (var i = 0; i < names.Length; i++)
-            Cell(names[i], columns[i], columns[i + 1], .60f, .67f, fontSize * .82f, i == 5, Ink, FontStyles.Bold);
+            Cell(names[i], columns[i], columns[i + 1], .60f, .67f, fontSize * .82f, i >= 5, Ink, FontStyles.Bold);
         for (var row = 0; row < data.Entries.Count; row++)
         {
             var entry = data.Entries[row];
-            var upper = .60f - row * .082f;
-            var lower = upper - .082f;
+            var upper = .60f - row * .12f;
+            var lower = upper - .12f;
             if (row % 2 == 0) Band(_body, "RowShade", 0, lower, 1, upper, PaperTint);
             var income = entry.Direction == "收入";
-            var values = new[] { (data.Page * PageSize + row + 1).ToString("00"), entry.Direction,
+            var values = new[] { entry.Direction,
                 CreditLedgerUi.Value(entry.CustomerName), CreditLedgerUi.Value(entry.TransactionType),
-                CreditLedgerUi.Value(FormatLedgerDetail(entry)),
-                (income ? "+" : "−") + entry.Amount.ToString("N0") };
+                CreditLedgerUi.ItemText(entry), CreditLedgerUi.DetailText(entry),
+                (income ? "+" : "−") + entry.Amount.ToString("N0"),
+                entry.BalanceAfter?.ToString("N0") ?? "未记录" };
             for (var col = 0; col < values.Length; col++)
                 Cell(values[col], columns[col], columns[col + 1], lower, upper,
-                    fontSize * (col == 4 ? .79f : .88f), col == 5,
-                    col == 1 || col == 5 ? (income ? Income : Expense) : Ink);
+                    fontSize * (col == 3 || col == 4 ? .82f : .88f), col >= 5,
+                    col == 0 || col == 5 ? (income ? Income : Expense) : Ink);
             Band(_body, "RowRule", 0, lower, 1, lower + .0015f, Rule);
         }
         if (data.TotalCount == 0)
             Text(_body, "该日暂无信用点交易记录", 0, .30f, 1, .55f,
                 fontSize * .95f, align: TextAlignmentOptions.Center);
+        Text(_body, "悬停文字查看完整明细 · 折叠余额为最后一笔成交后的余额", 0, .079f, 1, .115f,
+            fontSize * .65f, align: TextAlignmentOptions.Center);
         var label = manager.statusButton.GetComponentInChildren<TextMeshProUGUI>(true);
         var previous = MakeButton("Previous", _body, manager.statusButton, label, "上一页",
             () => { _page--; Render(manager); });
@@ -245,12 +249,10 @@ internal static class NativeLedgerTab
         var text = Text(_body!, value, left + .006f, bottom + .005f, right - .006f, top - .005f,
             size, style, rightAlign ? TextAlignmentOptions.MidlineRight : TextAlignmentOptions.MidlineLeft);
         text.color = color;
-    }
-
-    private static string FormatLedgerDetail(CreditLedgerUi.LedgerDisplayEntry entry)
-    {
-        var item = entry.FoldCount > 1 ? $"{entry.Detail} ×{entry.FoldCount}" : entry.Detail;
-        return string.IsNullOrWhiteSpace(entry.Negotiation) ? item : $"{item}\n议价：{entry.Negotiation}";
+        // Use the game's own hover tooltip so long modifier lists remain
+        // readable without introducing a separate ledger window.
+        text.raycastTarget = true;
+        TabletUI.AddTooltip(text.gameObject, () => value);
     }
 
     private static void Metric(RectTransform parent, string name, long amount, float left, Color color, float size)

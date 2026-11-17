@@ -50,24 +50,6 @@ internal static class PlayerStoreLoadGameLedgerPatch
         AIWorldPawnshopMod.Instance?.OnNativeGameLoaded(__instance.saveSlotId, NewGameData.Instance?.saveFile);
 }
 
-[HarmonyPatch(typeof(PlayerStore), nameof(PlayerStore.OnItemBought))]
-internal static class PlayerStoreItemBoughtPatch
-{
-    private static void Postfix(GameItem __0, int __1) => AIWorldPawnshopMod.Instance?.OnNativeItemBought(__0, __1);
-}
-
-[HarmonyPatch(typeof(PlayerStore), nameof(PlayerStore.SellItem))]
-internal static class PlayerStoreItemSoldLedgerPatch
-{
-    private static void Prefix(PlayerStore __instance, out int __state) => __state = __instance.playerCash;
-
-    private static void Postfix(PlayerStore __instance, GameItem __0, int __state)
-    {
-        var income = (long)__instance.playerCash - __state;
-        if (income > 0 && income <= int.MaxValue) AIWorldPawnshopMod.Instance?.OnNativeItemSold(__0, (int)income);
-    }
-}
-
 internal static class CreditLedgerPatchSupport
 {
     [ThreadStatic] private static int _nightSettlementDepth;
@@ -93,21 +75,6 @@ internal static class CreditLedgerPatchSupport
 
     internal static void Record(long delta, string transactionType, string detail) =>
         CreditLedgerRuntime.RecordFromPatch(delta, transactionType, detail);
-}
-
-[HarmonyPatch(typeof(PlayerStore), nameof(PlayerStore.ModCash))]
-internal static class PlayerStoreModCashLedgerPatch
-{
-    private static void Prefix(PlayerStore __instance, out int __state) => __state = __instance.playerCash;
-
-    private static void Postfix(PlayerStore __instance, int __state)
-    {
-        if (CreditLedgerPatchSupport.IsNightSettlement || CreditLedgerPatchSupport.IsObservedAction) return;
-        var delta = (long)__instance.playerCash - __state;
-        if (delta == 0) return;
-        var source = CreditLedgerRuntime.DescribeModCashSource(delta).Split('|');
-        CreditLedgerPatchSupport.Record(delta, source[0], source[1]);
-    }
 }
 
 [HarmonyPatch(typeof(NegociationUIManager), nameof(NegociationUIManager.OnOfferAcceptClick))]
@@ -245,14 +212,6 @@ internal static class PlayerStoreSellAllLedgerPatch
 {
     private static void Prefix(PlayerStore __instance, out int __state) => __state = __instance.playerCash;
     private static void Postfix(PlayerStore __instance, int __state) => DirectCashChangePatch.Record(__instance, __state, "批量出售", "批量出售物品");
-}
-
-[HarmonyPatch(typeof(AppraisalServiceHelper), nameof(AppraisalServiceHelper.GiveAppraisalFee))]
-internal static class AppraisalServiceCreditLedgerPatch
-{
-    private static void Prefix(out int __state) => __state = PlayerStore.Instance?.playerCash ?? 0;
-    private static void Postfix(int __state) => CreditLedgerPatchSupport.Record(
-        (long)(PlayerStore.Instance?.playerCash ?? __state) - __state, "鉴定服务收入", "提供物品鉴定");
 }
 
 [HarmonyPatch(typeof(CurrentConverterHelper), nameof(CurrentConverterHelper.Supply))]

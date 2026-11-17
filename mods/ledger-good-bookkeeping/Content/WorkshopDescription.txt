@@ -1,0 +1,37 @@
+[h1]信用点收支显示&账本：好好记账[/h1]
+把每天的信用点收支记清楚。《信用点收支显示&账本：好好记账》将账本整合进游戏原生日历，点击“账本”标签查看当天记录，也可切换回看昨天；打开日历保留原版默认页面。
+
+[h2]账本功能[/h2]
+[list]
+[*]汇总每日收入、支出与净额
+[*]分列显示收支方向、顾客、交易类型、物品、明细、金额和成交后剩余信用点
+[*]显示实际生效的事件、顾客、物品状态、议价及批发价格修正
+[*]仅折叠相邻且同名、同规格、同单价、同价格修正的物品，并标注数量
+[*]显示完整容器名称、液体当前量／容量及能源剩余／容量
+[*]支持分页查看；账本随当前游戏存档保存与读取
+[*]信用点变动时显示从店内底部向上飘出的加粗收支提示
+[/list]
+账本记录顾客交易及游戏内各类信用点结算，帮助你核对每天的资金变化。
+
+[h2]1.1.9 性能优化[/h2]
+日常交易仅追加新增流水，不再反复重写历史存档快照，减少单笔及批量交易的卡顿。保留逐项明细、存档回滚和旧记录迁移，页面与飘字样式保持不变。手动备份账本时，请备份整个 DeepSpacePawnshopLedger 数据目录。
+
+[hr][/hr]
+
+[h1]Credit Flow Display & Keep Your Books Straight[/h1]
+Keep every credit movement easy to review. This mod adds a ledger page to the in-game calendar. Select the Ledger tab to view today or yesterday. The calendar keeps its original default page.
+
+[h2]Ledger Features[/h2]
+[list]
+[*]See daily totals for income, expenses, and net balance
+[*]Separate columns show direction, customer, transaction type, item, details, amount, and the balance after settlement
+[*]Review applied event, customer, condition, negotiation, and wholesale price modifiers
+[*]Fold only adjacent items with matching names, specifications, unit prices, and price modifiers
+[*]See full container names, liquid volumes, and energy storage levels
+[*]Browse paginated records; ledger data is saved and restored with the active game save
+[*]Show a bold, high-visibility credit change toast for every recorded income or expense
+[/list]
+Customer trades and in-game credit settlements are recorded from their actual balance changes, helping you keep track of where your money went.
+
+[h2]1.1.9 Performance Update[/h2]
+Transactions now append only new entries instead of repeatedly rewriting historical save snapshots, reducing recording stalls for single and bulk trades. Item details, save rollback and legacy records are preserved. The ledger layout and toast appearance are unchanged. For manual backups, copy the entire DeepSpacePawnshopLedger data directory.

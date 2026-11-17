@@ -1,4 +1,5 @@
 using AIWorldPawnshop.Models;
+using System.Text.RegularExpressions;
 
 namespace AIWorldPawnshop.UI;
 
@@ -13,6 +14,11 @@ internal static class CreditLedgerUi
         public string Detail = string.Empty;
         public string Negotiation = string.Empty;
         public int FoldCount;
+        public int UnitPrice;
+        public long? BalanceAfter;
+        public string ItemName = string.Empty;
+        public string ItemIdentifier = string.Empty;
+        public string ItemSpecification = string.Empty;
     }
 
     internal sealed class PageData
@@ -45,20 +51,35 @@ internal static class CreditLedgerUi
             normalized.Add(current);
         }
         var entries = normalized.AsEnumerable().Reverse().ToList();
-        var folded = entries
-            .GroupBy(x => (x.Direction, x.CustomerName, x.TransactionType,
-                ItemName: ItemName(x.Detail), x.Negotiation))
-            .Select(group => new LedgerDisplayEntry
+        var folded = new List<LedgerDisplayEntry>();
+        foreach (var entry in entries)
+        {
+            var itemName = EntryItemName(entry);
+            var detail = IsItem(entry) ? (string.IsNullOrWhiteSpace(entry.ItemName) ? "" : entry.Detail) : entry.Detail;
+            var previous = folded.LastOrDefault();
+            // Only adjacent identical item transactions can share a row. This
+            // preserves chronology and makes the displayed closing balance
+            // the balance after the last transaction in that group.
+            if (IsTradeItem(entry) && previous is not null && previous.ItemName == itemName &&
+                previous.ItemIdentifier == entry.ItemIdentifier && previous.ItemSpecification == entry.ItemSpecification &&
+                previous.UnitPrice == entry.Amount && previous.Direction == entry.Direction &&
+                previous.CustomerName == entry.CustomerName && previous.TransactionType == entry.TransactionType &&
+                previous.Detail == detail && previous.Negotiation == entry.Negotiation &&
+                CanJoinBalances(previous, entry))
             {
-                Direction = group.Key.Direction,
-                Amount = group.Sum(x => (long)x.Amount),
-                CustomerName = group.Key.CustomerName,
-                TransactionType = group.Key.TransactionType,
-                Detail = group.Key.ItemName,
-                Negotiation = group.Key.Negotiation,
-                FoldCount = group.Count()
-            })
-            .ToList();
+                previous.Amount += entry.Amount;
+                previous.FoldCount++;
+                continue;
+            }
+            folded.Add(new LedgerDisplayEntry
+            {
+                Direction = entry.Direction, Amount = entry.Amount, UnitPrice = entry.Amount,
+                CustomerName = entry.CustomerName, TransactionType = entry.TransactionType,
+                Detail = detail, Negotiation = entry.Negotiation, FoldCount = 1,
+                BalanceAfter = entry.BalanceAfter, ItemName = itemName,
+                ItemIdentifier = entry.ItemIdentifier, ItemSpecification = entry.ItemSpecification
+            });
+        }
         var count = Math.Max(1, (folded.Count + pageSize - 1) / pageSize);
         page = Math.Max(0, Math.Min(page, count - 1));
         return new PageData
@@ -70,11 +91,59 @@ internal static class CreditLedgerUi
         };
     }
 
-    private static string ItemName(string? detail)
+    private static bool CanJoinBalances(LedgerDisplayEntry newer, CreditLedgerEntry older)
     {
-        if (string.IsNullOrWhiteSpace(detail)) return "—";
-        var identifierStart = detail.IndexOf('（');
-        return identifierStart > 0 ? detail[..identifierStart] : detail;
+        if (!newer.BalanceAfter.HasValue || !older.BalanceAfter.HasValue)
+            return newer.BalanceAfter == older.BalanceAfter;
+        // Wholesale entries can share the same balance (one payment).
+        if (newer.BalanceAfter == older.BalanceAfter) return true;
+        var delta = newer.Direction == "收入" ? newer.Amount : -newer.Amount;
+        return older.BalanceAfter + delta == newer.BalanceAfter;
+    }
+
+    private static bool IsItem(CreditLedgerEntry entry) => !string.IsNullOrWhiteSpace(entry.ItemName) ||
+        IsTradeItem(entry);
+
+    private static bool IsTradeItem(CreditLedgerEntry entry) =>
+        entry.TransactionType is "向顾客购入" or "售予顾客" or "购买物品" or "出售物品";
+
+    private static string EntryItemName(CreditLedgerEntry entry)
+    {
+        if (!IsItem(entry)) return string.Empty;
+        if (!string.IsNullOrWhiteSpace(entry.ItemName)) return entry.ItemName;
+        // Older records appended an internal identifier. Remove only that
+        // suffix, never meaningful parentheses such as 瓶装水（大）.
+        return Regex.Replace(entry.Detail ?? "", @"（[^（）]+）$", match =>
+            Regex.IsMatch(match.Value, @"[a-zA-Z0-9_]{8,}") ? "" : match.Value);
+    }
+
+    internal static string ItemText(LedgerDisplayEntry entry)
+    {
+        if (string.IsNullOrWhiteSpace(entry.ItemName)) return "—";
+        var specification = string.IsNullOrWhiteSpace(entry.ItemSpecification) ? "" : $"（{entry.ItemSpecification}）";
+        var count = entry.FoldCount > 1 ? $" ×{entry.FoldCount}" : "";
+        return entry.ItemName + specification + count;
+    }
+
+    internal static string DetailText(LedgerDisplayEntry entry)
+    {
+        var lines = new List<string>();
+        if (!string.IsNullOrWhiteSpace(entry.ItemName))
+        {
+            var label = entry.TransactionType switch
+            {
+                "鉴定服务收入" => "鉴定服务费",
+                "自动贩卖机收入" => "提取收入",
+                "市场委托收入" => "委托奖励",
+                _ => "成交单价"
+            };
+            lines.Add($"{label} {entry.UnitPrice:N0}");
+        }
+        if (!string.IsNullOrWhiteSpace(entry.Detail))
+            lines.Add(entry.Detail.Contains("CreditLedgerRuntime") && entry.Detail.Contains("DescribeModCashSource")
+                ? "历史记录未保存信用点来源" : entry.Detail);
+        if (!string.IsNullOrWhiteSpace(entry.Negotiation)) lines.Add(entry.Negotiation);
+        return Value(string.Join("\n", lines));
     }
 
     private static bool IsLegacyDoubleEntry(CreditLedgerEntry first, CreditLedgerEntry second) =>

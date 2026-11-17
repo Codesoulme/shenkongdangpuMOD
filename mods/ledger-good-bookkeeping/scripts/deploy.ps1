@@ -11,6 +11,11 @@ $dll = Join-Path $buildDir "DeepSpacePawnshopLedger.dll"
 $modsDir = Join-Path $GameDir "Mods\DeepSpacePawnshopLedger"
 $dataDir = $DataDir
 
+$gameExe = Join-Path $GameDir "Probably Stolen.exe"
+$runningGame = Get-Process -Name "Probably Stolen" -ErrorAction SilentlyContinue |
+    Where-Object { $_.Path -eq $gameExe }
+if ($runningGame) { throw "游戏正在运行，不能替换本地 DLL。退出游戏后再部署。" }
+
 if (-not (Test-Path $dll)) {
     throw "找不到构建产物：$dll"
 }

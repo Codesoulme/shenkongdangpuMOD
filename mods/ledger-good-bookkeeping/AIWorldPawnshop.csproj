@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFramework>netstandard2.1</TargetFramework>
-    <Version>1.1.0</Version>
+    <Version>1.1.9</Version>
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
@@ -57,10 +57,19 @@
     <Compile Include="src\AssemblyInfo.cs" />
     <Compile Include="src\ModConstants.cs" />
     <Compile Include="src\LedgerPatches.cs" />
+    <Compile Include="src\LedgerTradePatches.cs" />
+    <Compile Include="src\LedgerAppraisalPatches.cs" />
+    <Compile Include="src\LedgerBatchPatches.cs" />
+    <Compile Include="src\LedgerCashPatches.cs" />
+    <Compile Include="src\LedgerIncomeSourcePatches.cs" />
+    <Compile Include="src\CreditToastPatches.cs" />
     <Compile Include="src\Models\CreditLedgerModels.cs" />
     <Compile Include="src\Runtime\CreditLedgerRuntime.cs" />
+    <Compile Include="src\Runtime\LedgerCashSource.cs" />
     <Compile Include="src\Compatibility\LedgerGameAccess.cs" />
+    <Compile Include="src\Compatibility\LedgerTradeDetails.cs" />
     <Compile Include="src\UI\CreditLedgerUi.cs" />
+    <Compile Include="src\UI\CreditChangeToast.cs" />
     <Compile Include="src\UI\NativeLedgerTab.cs" />
   </ItemGroup>
 

@@ -1,20 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
 <ModManifest>
   <ID>DeepSpacePawnshopLedger</ID>
-  <Name>账本：好好记账</Name>
+  <Name>信用点收支显示&amp;账本：好好记账</Name>
   <Author>一万万</Author>
-  <ModVersion>1.1.0</ModVersion>
+  <ModVersion>1.1.9</ModVersion>
   <Description><![CDATA[
 把每天的信用点收支记清楚。
 
-《账本：好好记账》将账本整合进游戏原生日历，打开日历即可查看当天记录，也可切换回看昨天。
+《信用点收支显示&账本：好好记账》将账本整合进游戏原生日历。点击“账本”标签查看当天记录，也可切换回看昨天；打开日历保留原版默认页面。
 
 ### 账本功能
 
 - 汇总每日收入、支出与净额
-- 逐笔列出收支方向、顾客、交易类型、物品明细和金额
-- 显示交易中实际生效的折扣或加价
-- 自动折叠同名物品，并标注数量
+- 分列显示收支方向、顾客、交易类型、物品、明细、金额与成交后剩余信用点
+- 记录成交时生效的事件、顾客、物品状态、议价及批发价格修正
+- 显示完整物品或容器名称及液体、能源等容量规格
+- 仅折叠相邻且同名、同规格、同成交单价、同价格修正的物品，并标注数量
 - 支持分页查看；账本随当前游戏存档保存与读取
 
 账本记录顾客交易及游戏内各类信用点结算，帮助你核对每天的资金变化。
@@ -23,14 +24,15 @@
 
 ### Keep Your Books Straight
 
-Keep every credit movement easy to review. This mod adds a ledger page to the in-game calendar. It opens on today's transactions, and you can switch to yesterday whenever you need to look back.
+Keep every credit movement easy to review. Open the Ledger tab in the in-game calendar to see today's transactions, or switch to yesterday. Opening the calendar keeps the game's original default page.
 
 ### Ledger Features
 
 - See daily totals for income, expenses, and net balance
-- Review each entry by direction, customer when available, transaction type, item details, and amount
-- See discounts or markups that were actually applied to completed trades
-- Fold entries for items with the same name and see the total quantity
+- Separate columns show direction, customer, transaction type, item, details, amount, and the balance after settlement
+- Record applied event, customer, condition, negotiation, and wholesale price modifiers
+- See full container names, liquid volumes, energy levels, and capacities
+- Fold only adjacent identical items with matching specifications, unit prices, and price modifiers
 - Browse paginated records; ledger data is saved and restored with the active game save
 
 Customer trades and in-game credit settlements are recorded from their actual balance changes, helping you keep track of where your money went.
@@ -43,7 +45,5 @@ Customer trades and in-game credit settlements are recorded from their actual ba
   </Assemblies>
   <Capabilities>
     <Capability>files</Capability>
-    <Capability>dynamic-code</Capability>
-    <Capability>reflection-external</Capability>
   </Capabilities>
 </ModManifest>

@@ -7,7 +7,7 @@
 | 模组 | 目录 | Mod ID | 当前版本 | 简介 | Steam 创意工坊 |
 |---|---|---|---|---|---|
 | 自由聊天&议价&交换 | [`mods/free-chat-bargain-barter/`](mods/free-chat-bargain-barter/) | `FreeChatBargainBarter` | 0.4.8 | 顾客自由交谈、议价与物品交换 | [订阅](https://steamcommunity.com/sharedfiles/filedetails/?id=3829066775) |
-| 账本：好好记账 | [`mods/ledger-good-bookkeeping/`](mods/ledger-good-bookkeeping/) | `DeepSpacePawnshopLedger` | 1.1.0 | 在原生日历查看当天与昨天的信用点流水 | [订阅](https://steamcommunity.com/sharedfiles/filedetails/?id=3832110492) |
+| 信用点收支显示&账本：好好记账 | [`mods/ledger-good-bookkeeping/`](mods/ledger-good-bookkeeping/) | `DeepSpacePawnshopLedger` | 1.1.9 | 收支飘字提示；在原生日历查看当天与昨天的信用点流水；增量记账减少交易卡顿 | [订阅](https://steamcommunity.com/sharedfiles/filedetails/?id=3832110492) |
 | 搜打撤！拾荒！ | [`mods/scavenge-extraction/`](mods/scavenge-extraction/) | `ScavengeExtraction` | 0.1.0 原型 | 互动地图、装备医疗、多人阵营遭遇、战斗搜刮与撤离 | 本地测试，未发布 |
 
 ## 仓库结构

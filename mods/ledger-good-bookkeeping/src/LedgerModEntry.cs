@@ -1,5 +1,6 @@
 using AIWorldPawnshop.Runtime;
 using AIWorldPawnshop.UI;
+using AIWorldPawnshop.Compatibility;
 using UnityEngine;
 
 namespace AIWorldPawnshop;
@@ -19,6 +20,8 @@ public sealed class AIWorldPawnshopMod : IMod
 
     public void OnDisable()
     {
+        CreditChangeToast.Reset();
+        Runtime?.Checkpoint();
         Runtime = null;
         if (Instance == this) Instance = null;
     }
@@ -26,8 +29,9 @@ public sealed class AIWorldPawnshopMod : IMod
     internal void OnNativeSave(int slot) => Runtime?.OnSave(slot);
     internal void OnNativeSaveRotated(int slot, string? historyFile) => Runtime?.OnSaveRotated(slot, historyFile);
     internal void OnNativeGameLoaded(int slot, string? saveFile) => Runtime?.OnGameLoaded(slot, saveFile);
-    internal void OnNativeItemBought(GameItem? item, int cost) => Runtime?.RecordItemBought(item, cost);
-    internal void OnNativeItemSold(GameItem? item, int amount) => Runtime?.RecordItemSold(item, amount);
+    internal void OnNativeItemBought(LedgerTradeDetails item, int cost, long? balanceAfter = null) => Runtime?.RecordItemBought(item, cost, balanceAfter);
+    internal void OnNativeItemSold(LedgerTradeDetails item, int amount, long? balanceAfter = null) => Runtime?.RecordItemSold(item, amount, balanceAfter);
     internal void OnNativeInformationPurchased(int amount, string customerName) => Runtime?.RecordInformationPurchase(amount, customerName);
+    internal void OnNativeAppraisalIncome(long delta, LedgerTradeDetails? item) => Runtime?.RecordAppraisalIncome(delta, item);
     internal void OnNativeCreditChanged(long delta, string type, string detail) => Runtime?.RecordCreditChange(delta, type, detail);
 }
