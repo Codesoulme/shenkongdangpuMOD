@@ -1,0 +1,12 @@
+{
+  "ScannerVersion": 4,
+  "MethodsScanned": 322,
+  "Error": null,
+  "ObservedUtc": "2026-11-17T05:53:41.5301167Z",
+  "CandidateSha256": "173296C80C9837CF15E7F53A956517E2C78FF78706BCF59598E8AB0A2D4D881B",
+  "GameAssemblySha256": "725CB999D019DFF1FF31BED353C7F9BB8D81A7605A15DE1F80F5A3A6CF7B1D05",
+  "Capabilities": [],
+  "Findings": [],
+  "HardFlags": [],
+  "Pending": []
+}

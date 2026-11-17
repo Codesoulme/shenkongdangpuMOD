@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ModManifest>
+  <ID>ScavengeExtraction</ID>
+  <Name>搜打撤！拾荒！</Name>
+  <Author>一万万</Author>
+  <ModVersion>0.1.0</ModVersion>
+  <Description><![CDATA[拾荒搜打撤玩法原型。夜间前往原版拾荒地点，在互动地图选择路线，点击拾荒直接执行原版掉落流程；遭遇阵营对手、战斗并携带战利品撤离。
+
+同一区域可出现多名NPC，姓名卡片使用阵营色，可分别对话、攻击、偷窃和拖入药品治疗。左侧独立信息栏，战斗使用原版机械风格标签，并显示双方伤害飘字。撤离按钮仅在可撤离节点出现。
+
+无等级；使用随身的原版武器、防具、药品。生命跨天保留，不自动恢复。新增拾荒效果追加在物品原有介绍之后。包含声望影响敌意、第一人称战斗、击杀/击晕/放走、尸体搜刮与持刀肢解、求饶缴械和原版失败界面。
+
+0.1.0本地原型：固定小地图与回合制战斗，尸体使用占位图。会保存生命和装备选择，也可能损失本次携带的全部物品及背包。建议先用测试存档；停用前取出模组容器中的物品。没有联网、外部文件、进程或开发者模式功能。]]></Description>
+  <GameVersions><Version>1.0.0</Version><Version>0.46D</Version></GameVersions>
+  <Assemblies><Assembly>ScavengeExtraction.dll</Assembly></Assemblies>
+  <Capabilities />
+</ModManifest>

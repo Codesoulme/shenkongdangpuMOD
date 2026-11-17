@@ -8,13 +8,15 @@
 |---|---|---|---|---|---|
 | 自由聊天&议价&交换 | [`mods/free-chat-bargain-barter/`](mods/free-chat-bargain-barter/) | `FreeChatBargainBarter` | 0.4.8 | 顾客自由交谈、议价与物品交换 | [订阅](https://steamcommunity.com/sharedfiles/filedetails/?id=3829066775) |
 | 账本：好好记账 | [`mods/ledger-good-bookkeeping/`](mods/ledger-good-bookkeeping/) | `DeepSpacePawnshopLedger` | 1.1.0 | 在原生日历查看当天与昨天的信用点流水 | [订阅](https://steamcommunity.com/sharedfiles/filedetails/?id=3832110492) |
+| 搜打撤！拾荒！ | [`mods/scavenge-extraction/`](mods/scavenge-extraction/) | `ScavengeExtraction` | 0.1.0 原型 | 互动地图、装备医疗、多人阵营遭遇、战斗搜刮与撤离 | 本地测试，未发布 |
 
 ## 仓库结构
 
 ```text
 mods/
 ├── free-chat-bargain-barter/   # 自由聊天、议价与交换
-└── ledger-good-bookkeeping/    # 信用点账本
+├── ledger-good-bookkeeping/    # 信用点账本
+└── scavenge-extraction/        # 搜打撤拾荒原型
 ```
 
 每个模组目录均包含自己的 `.csproj`、`manifest.xml`、`src/`、`Content/` 和 `README.md`。提交改动时，请确认修改落在对应模组目录；共享目录仅用于仓库级索引和协作说明。
